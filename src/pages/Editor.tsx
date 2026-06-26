@@ -8,7 +8,7 @@ import {
   ZoomIn, ZoomOut, Maximize2, X, Save, RotateCw, Trash2,
   MousePointer, Highlighter, PenLine, Type, Eraser,
   Search, ChevronUp, ChevronDown, Crop, LayoutGrid, FilePlus, CheckSquare,
-  BookOpen, MessageSquare,
+  BookOpen, MessageSquare, Layers,
 } from 'lucide-react'
 import 'react-pdf/dist/Page/AnnotationLayer.css'
 import 'react-pdf/dist/Page/TextLayer.css'
@@ -112,6 +112,9 @@ export default function Editor() {
   // Working copy — page ops write here; original never touched until Save
   const [workingFile, setWorkingFile] = useState<string | null>(null)
   const workingFileRef = useRef<string | null>(null)
+
+  // Content Tools modal
+  const [showContentTools, setShowContentTools] = useState(false)
 
   const viewerRef = useRef<HTMLDivElement>(null)
   const overlayRef = useRef<HTMLCanvasElement>(null)
@@ -417,6 +420,15 @@ export default function Editor() {
     }
   }
 
+  // Run a content-tools command on the working copy then reload
+  const runContentOp = async (cmd: string, args: object) => {
+    const wf = await ensureWorkingCopy()
+    if (!wf) return
+    await window.electronAPI?.pdfCommand(cmd, { input: wf, output: wf, ...args })
+    await reloadPdf()
+    setShowContentTools(false)
+  }
+
   const reorderPagesAction = async (fromPage: number, toPage: number) => {
     if (!activeFile || fromPage === toPage) return
     const wf = await ensureWorkingCopy()
@@ -674,6 +686,13 @@ export default function Editor() {
         )}
       </div>
 
+      {/* Content Tools modal */}
+      <AnimatePresence>
+        {showContentTools && activeFile && (
+          <ContentToolsModal onClose={() => setShowContentTools(false)} onApply={runContentOp} />
+        )}
+      </AnimatePresence>
+
       <AnimatePresence mode="wait">
         {files.length === 0 ? (
           <motion.div
@@ -823,6 +842,13 @@ export default function Editor() {
                   {allMatches.length > 0 && <span style={{ fontSize: 10 }}>{allMatches.length}</span>}
                 </TBtn>
 
+                <Sep />
+
+                {/* Content Tools */}
+                <TBtn onClick={() => setShowContentTools(o => !o)} active={showContentTools} title="Content Tools (watermark, stamp, header/footer, page numbers)">
+                  <Layers size={13} />
+                </TBtn>
+
                 {pageAnnotCount > 0 && (
                   <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)' }}>{pageAnnotCount} annotation{pageAnnotCount !== 1 ? 's' : ''}</span>
                 )}
@@ -952,6 +978,176 @@ export default function Editor() {
       </AnimatePresence>
     </div>
   )
+}
+
+// ── Content Tools modal ───────────────────────────────────────────────────────
+
+const STAMP_OPTIONS = ['DRAFT', 'APPROVED', 'CONFIDENTIAL', 'COPY', 'VOID'] as const
+const STAMP_PILL: Record<string, string> = {
+  DRAFT: '#b45309', APPROVED: '#16a34a', CONFIDENTIAL: '#dc2626', COPY: '#2563eb', VOID: '#7f1d1d',
+}
+
+function ContentToolsModal({ onClose, onApply }: {
+  onClose: () => void
+  onApply: (cmd: string, args: object) => Promise<void>
+}) {
+  const [tab, setTab] = useState<'watermark' | 'stamp' | 'header' | 'pagenum'>('watermark')
+  const [busy, setBusy] = useState(false)
+
+  const [wmText, setWmText]       = useState('DRAFT')
+  const [wmOpacity, setWmOpacity] = useState(30)
+  const [wmAngle, setWmAngle]     = useState(45)
+
+  const [stamp, setStamp]       = useState('DRAFT')
+  const [stampPos, setStampPos] = useState('top-right')
+
+  const [headerText, setHeaderText] = useState('')
+  const [footerText, setFooterText] = useState('')
+
+  const [pnPos, setPnPos]   = useState('bottom-center')
+  const [pnStart, setPnStart] = useState(1)
+
+  const apply = async () => {
+    setBusy(true)
+    try {
+      if (tab === 'watermark') {
+        await onApply('add_watermark', { text: wmText, opacity: wmOpacity / 100, angle: wmAngle, font_size: 60 })
+      } else if (tab === 'stamp') {
+        await onApply('add_stamp', { stamp, position: stampPos, page_num: -1 })
+      } else if (tab === 'header') {
+        await onApply('add_header_footer', { header: headerText, footer: footerText, font_size: 10 })
+      } else {
+        await onApply('add_page_numbers', { position: pnPos, start: pnStart, font_size: 11 })
+      }
+    } catch (err) {
+      alert(`Content tool failed: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const TABS = [
+    { id: 'watermark', label: 'Watermark' },
+    { id: 'stamp',     label: 'Stamp' },
+    { id: 'header',    label: 'Header / Footer' },
+    { id: 'pagenum',   label: 'Page Numbers' },
+  ] as const
+
+  return (
+    <>
+      <motion.div
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        onClick={onClose}
+        style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 2000 }}
+      />
+      <div style={{ position: 'fixed', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2001, pointerEvents: 'none' }}>
+        <motion.div
+          initial={{ opacity: 0, scale: 0.94 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.94 }}
+          transition={{ duration: 0.14 }}
+          style={{ width: 390, pointerEvents: 'all', background: 'rgba(10,8,32,0.97)', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 16, overflow: 'hidden', boxShadow: '0 28px 64px rgba(0,0,0,0.55)' }}
+        >
+          {/* Title */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 16px', borderBottom: '1px solid rgba(255,255,255,0.09)' }}>
+            <Layers size={14} color="#a5b4fc" />
+            <span style={{ fontWeight: 700, fontSize: 14, flex: 1 }}>Content Tools</span>
+            <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 2, display: 'flex' }}><X size={14} /></button>
+          </div>
+
+          {/* Tabs */}
+          <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+            {TABS.map(({ id, label }) => (
+              <button key={id} onClick={() => setTab(id)} style={{ flex: 1, padding: '9px 2px', background: 'none', border: 'none', borderBottom: tab === id ? '2px solid #6366f1' : '2px solid transparent', color: tab === id ? '#a5b4fc' : 'var(--text-muted)', fontSize: 11, fontWeight: tab === id ? 700 : 400, cursor: 'pointer' }}>
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {/* Form */}
+          <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 13 }}>
+            {tab === 'watermark' && <>
+              <CtField label="Text">
+                <CtInput value={wmText} onChange={e => setWmText(e.target.value)} placeholder="e.g. DRAFT" />
+              </CtField>
+              <CtField label={`Opacity — ${wmOpacity}%`}>
+                <input type="range" min={5} max={75} value={wmOpacity} onChange={e => setWmOpacity(+e.target.value)} style={{ width: '100%', accentColor: '#6366f1' }} />
+              </CtField>
+              <CtField label={`Angle — ${wmAngle}°`}>
+                <input type="range" min={0} max={90} value={wmAngle} onChange={e => setWmAngle(+e.target.value)} style={{ width: '100%', accentColor: '#6366f1' }} />
+              </CtField>
+            </>}
+
+            {tab === 'stamp' && <>
+              <CtField label="Stamp type">
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {STAMP_OPTIONS.map(s => (
+                    <button key={s} onClick={() => setStamp(s)} style={{ padding: '4px 10px', borderRadius: 6, border: `1.5px solid ${STAMP_PILL[s]}`, background: stamp === s ? STAMP_PILL[s] + '28' : 'transparent', color: STAMP_PILL[s], fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>{s}</button>
+                  ))}
+                </div>
+              </CtField>
+              <CtField label="Position">
+                <CtSelect value={stampPos} onChange={e => setStampPos(e.target.value)}>
+                  <option value="top-right">Top Right</option>
+                  <option value="top-left">Top Left</option>
+                  <option value="center">Centre</option>
+                  <option value="bottom-right">Bottom Right</option>
+                  <option value="bottom-left">Bottom Left</option>
+                </CtSelect>
+              </CtField>
+            </>}
+
+            {tab === 'header' && <>
+              <CtField label="Header (top of every page)">
+                <CtInput value={headerText} onChange={e => setHeaderText(e.target.value)} placeholder="Header text…" />
+              </CtField>
+              <CtField label="Footer (bottom of every page)">
+                <CtInput value={footerText} onChange={e => setFooterText(e.target.value)} placeholder="Footer text…" />
+              </CtField>
+            </>}
+
+            {tab === 'pagenum' && <>
+              <CtField label="Position">
+                <CtSelect value={pnPos} onChange={e => setPnPos(e.target.value)}>
+                  <option value="bottom-center">Bottom Centre</option>
+                  <option value="bottom-right">Bottom Right</option>
+                  <option value="bottom-left">Bottom Left</option>
+                  <option value="top-center">Top Centre</option>
+                  <option value="top-right">Top Right</option>
+                  <option value="top-left">Top Left</option>
+                </CtSelect>
+              </CtField>
+              <CtField label="Starting number">
+                <CtInput type="number" min="1" value={String(pnStart)} onChange={e => setPnStart(Math.max(1, +e.target.value))} />
+              </CtField>
+            </>}
+          </div>
+
+          {/* Apply */}
+          <div style={{ padding: '0 16px 16px' }}>
+            <button onClick={apply} disabled={busy} style={{ width: '100%', padding: 10, borderRadius: 10, border: 'none', background: busy ? 'rgba(99,102,241,0.3)' : 'linear-gradient(135deg,#6366f1,#8b5cf6)', color: 'white', fontSize: 13, fontWeight: 700, cursor: busy ? 'default' : 'pointer' }}>
+              {busy ? 'Applying…' : 'Apply to All Pages'}
+            </button>
+          </div>
+        </motion.div>
+      </div>
+    </>
+  )
+}
+
+function CtField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+      <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>{label}</span>
+      {children}
+    </div>
+  )
+}
+
+function CtInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
+  return <input {...props} style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 7, padding: '7px 10px', color: 'var(--text-primary)', fontSize: 13, outline: 'none', width: '100%', boxSizing: 'border-box', ...props.style }} />
+}
+
+function CtSelect(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
+  return <select {...props} style={{ background: 'rgba(30,25,60,0.95)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 7, padding: '7px 10px', color: 'var(--text-primary)', fontSize: 13, outline: 'none', width: '100%', ...props.style }} />
 }
 
 // ── Outline panel (Bookmarks tab) ────────────────────────────────────────────

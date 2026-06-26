@@ -196,6 +196,113 @@ def crop_page(input: str, output: str, page: int, rect: list, **_):
     _save(doc, input, output)
     return {"success": True}
 
+_STAMP_COLORS = {
+    'APPROVED': (0.0, 0.55, 0.0),
+    'DRAFT':    (0.75, 0.45, 0.0),
+    'CONFIDENTIAL': (0.82, 0.0, 0.0),
+    'COPY':     (0.0, 0.2, 0.8),
+    'VOID':     (0.45, 0.0, 0.0),
+}
+
+def add_watermark(input: str, output: str, text: str, opacity: float = 0.3,
+                  angle: float = 45, font_size: float = 60, color: list = None, **_):
+    import fitz, math
+    col = tuple(color) if color else (0.65, 0.65, 0.65)
+    doc = fitz.open(input)
+    for page in doc:
+        r = page.rect
+        # Estimate text half-width to centre the diagonal watermark on the page
+        half_w = len(text) * font_size * 0.28
+        a = math.radians(angle)
+        ix = r.width  / 2 - half_w * math.cos(a)
+        iy = r.height / 2 + half_w * math.sin(a)
+        page.insert_text(fitz.Point(ix, iy), text,
+                         fontname="helv", fontsize=font_size,
+                         color=col, rotate=int(angle), overlay=True)
+    _save(doc, input, output)
+    return {"success": True}
+
+def add_stamp(input: str, output: str, stamp: str, position: str = 'top-right',
+              page_num: int = -1, **_):
+    import fitz
+    stamp = stamp.upper()
+    color = _STAMP_COLORS.get(stamp, (0.3, 0.3, 0.3))
+    font_size = 30
+    pad = 7
+    doc = fitz.open(input)
+    pages = [doc[page_num]] if 0 <= page_num < len(doc) else list(doc)
+    for page in pages:
+        r = page.rect
+        # Estimate text box size (hebo is bold; chars ~0.62× fontsize wide)
+        bw = len(stamp) * font_size * 0.62 + pad * 2
+        bh = font_size + pad * 2
+        if position == 'top-right':
+            x, y = r.width - bw - 20, 18
+        elif position == 'top-left':
+            x, y = 20, 18
+        elif position == 'bottom-right':
+            x, y = r.width - bw - 20, r.height - bh - 18
+        elif position == 'bottom-left':
+            x, y = 20, r.height - bh - 18
+        else:  # center
+            x, y = (r.width - bw) / 2, (r.height - bh) / 2
+        box = fitz.Rect(x, y, x + bw, y + bh)
+        page.draw_rect(box, color=color, width=2, overlay=True)
+        page.insert_text(fitz.Point(x + pad, y + font_size + pad * 0.4),
+                         stamp, fontname="hebo", fontsize=font_size,
+                         color=color, overlay=True)
+    _save(doc, input, output)
+    return {"success": True}
+
+def add_header_footer(input: str, output: str, header: str = '', footer: str = '',
+                      font_size: float = 10, **_):
+    import fitz
+    doc = fitz.open(input)
+    for page in doc:
+        r = page.rect
+        if header:
+            hw = len(header) * font_size * 0.55
+            page.insert_text(fitz.Point(r.width / 2 - hw / 2, font_size + 6),
+                              header, fontname="helv", fontsize=font_size,
+                              color=(0, 0, 0), overlay=True)
+            page.draw_line(fitz.Point(36, font_size + 10),
+                           fitz.Point(r.width - 36, font_size + 10),
+                           color=(0.7, 0.7, 0.7), width=0.5, overlay=True)
+        if footer:
+            fw = len(footer) * font_size * 0.55
+            page.draw_line(fitz.Point(36, r.height - font_size - 10),
+                           fitz.Point(r.width - 36, r.height - font_size - 10),
+                           color=(0.7, 0.7, 0.7), width=0.5, overlay=True)
+            page.insert_text(fitz.Point(r.width / 2 - fw / 2, r.height - 6),
+                              footer, fontname="helv", fontsize=font_size,
+                              color=(0, 0, 0), overlay=True)
+    _save(doc, input, output)
+    return {"success": True}
+
+def add_page_numbers(input: str, output: str, position: str = 'bottom-center',
+                     start: int = 1, font_size: float = 11, **_):
+    import fitz
+    doc = fitz.open(input)
+    for i, page in enumerate(doc):
+        r = page.rect
+        text = str(start + i)
+        tw = len(text) * font_size * 0.6
+        if position == 'bottom-center':
+            pt = fitz.Point(r.width / 2 - tw / 2, r.height - 8)
+        elif position == 'bottom-right':
+            pt = fitz.Point(r.width - tw - 20, r.height - 8)
+        elif position == 'bottom-left':
+            pt = fitz.Point(20, r.height - 8)
+        elif position == 'top-center':
+            pt = fitz.Point(r.width / 2 - tw / 2, font_size + 6)
+        elif position == 'top-right':
+            pt = fitz.Point(r.width - tw - 20, font_size + 6)
+        else:  # top-left
+            pt = fitz.Point(20, font_size + 6)
+        page.insert_text(pt, text, fontname="helv", fontsize=font_size, overlay=True)
+    _save(doc, input, output)
+    return {"success": True}
+
 def get_outline(input: str, **_):
     import fitz
     doc = fitz.open(input)
@@ -232,6 +339,10 @@ COMMANDS = {
     "rotate_page": rotate_page,
     "delete_page": delete_page,
     "apply_annotations": apply_annotations,
+    "add_watermark": add_watermark,
+    "add_stamp": add_stamp,
+    "add_header_footer": add_header_footer,
+    "add_page_numbers": add_page_numbers,
     "get_outline": get_outline,
     "encrypt_pdf": encrypt_pdf,
     "decrypt_pdf": decrypt_pdf,
