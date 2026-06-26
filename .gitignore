@@ -1,0 +1,10 @@
+node_modules/
+dist/
+dist-electron/
+release/
+.env
+*.local
+__pycache__/
+*.pyc
+*.pyo
+.claude/

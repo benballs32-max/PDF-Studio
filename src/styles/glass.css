@@ -1,0 +1,64 @@
+.glass {
+  background: var(--glass-white);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow), var(--glass-inner);
+}
+
+.glass-sm {
+  background: var(--glass-white);
+  backdrop-filter: var(--blur-sm);
+  -webkit-backdrop-filter: var(--blur-sm);
+  border: 1px solid var(--glass-border-subtle);
+  box-shadow: var(--glass-shadow-sm), var(--glass-inner);
+}
+
+.glass-hover {
+  transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.glass-hover:hover {
+  background: var(--glass-white-hover);
+  border-color: rgba(255,255,255,0.35);
+  box-shadow: var(--glass-shadow), var(--glass-inner), 0 0 20px var(--accent-glow);
+}
+
+/* Liquid shimmer border */
+.glass-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+
+.glass-shimmer::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(
+    135deg,
+    rgba(255,255,255,0.4) 0%,
+    rgba(255,255,255,0.05) 40%,
+    rgba(255,255,255,0.25) 100%
+  );
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* Glow pill for labels */
+.glass-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  background: var(--accent-light);
+  border: 1px solid rgba(99,102,241,0.3);
+  color: #a5b4fc;
+  backdrop-filter: blur(8px);
+}
