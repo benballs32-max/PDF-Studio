@@ -7,6 +7,7 @@ import {
   ArrowLeft, Upload, FileText, ChevronLeft, ChevronRight,
   ZoomIn, ZoomOut, Maximize2, X, Save, RotateCw, Trash2,
   MousePointer, Highlighter, PenLine, Type, Eraser,
+  Search, ChevronUp, ChevronDown,
 } from 'lucide-react'
 import 'react-pdf/dist/Page/AnnotationLayer.css'
 import 'react-pdf/dist/Page/TextLayer.css'
@@ -22,6 +23,34 @@ type Annot = AnnotShape & { id: string; page: number }
 
 const COLORS = ['#FACC15', '#34D399', '#60A5FA', '#F87171', '#C084FC', '#000000']
 const HIGHLIGHT_ALPHA = '55'
+
+// ── Full-text search ─────────────────────────────────────────────────────────
+interface TxtItem { str: string; x: number; y: number; w: number; h: number }
+interface PageText { pageNum: number; items: TxtItem[]; fullText: string; offsets: number[] }
+interface MatchRect { x: number; y: number; w: number; h: number }
+interface SearchMatch { page: number; rect: MatchRect }
+
+function buildMatchRects(pt: PageText, qLower: string): MatchRect[] {
+  const lower = pt.fullText.toLowerCase()
+  const rects: MatchRect[] = []
+  let pos = 0
+  while ((pos = lower.indexOf(qLower, pos)) !== -1) {
+    const end = pos + qLower.length
+    const hit = pt.items.filter((_, i) => {
+      const s = pt.offsets[i], e = s + pt.items[i].str.length
+      return e > pos && s < end && pt.items[i].str.trim()
+    })
+    if (hit.length) {
+      const minX = Math.min(...hit.map(t => t.x))
+      const maxX = Math.max(...hit.map(t => t.x + t.w))
+      const y = Math.min(...hit.map(t => t.y))
+      const h = Math.max(...hit.map(t => t.h)) || 12
+      rects.push({ x: minX, y, w: Math.max(maxX - minX, 4), h })
+    }
+    pos++
+  }
+  return rects
+}
 
 // Convert annotation canvas coords → PDF point space for PyMuPDF
 function toPdfCoords(
@@ -65,10 +94,18 @@ export default function Editor() {
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'done' | 'error'>('idle')
   const [loadError, setLoadError] = useState<string | null>(null)
 
+  // Search
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [textIndex, setTextIndex] = useState<PageText[]>([])
+  const [allMatches, setAllMatches] = useState<SearchMatch[]>([])
+  const [matchIdx, setMatchIdx] = useState(0)
+
   const viewerRef = useRef<HTMLDivElement>(null)
   const overlayRef = useRef<HTMLCanvasElement>(null)
   const pageContainerRef = useRef<HTMLDivElement>(null)
   const textInputRef = useRef<HTMLInputElement>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
 
   // ── Load a PDF by path directly ─────────────────────────────────────────────
   const loadPdf = async (path: string) => {
@@ -102,6 +139,69 @@ export default function Editor() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // ── Extract text from every page once PDF loads (for search) ────────────────
+  useEffect(() => {
+    if (!pdfData) { setTextIndex([]); setAllMatches([]); return }
+    let cancelled = false
+    ;(async () => {
+      const pdf = await pdfjs.getDocument(pdfData).promise
+      const index: PageText[] = []
+      for (let i = 1; i <= pdf.numPages; i++) {
+        if (cancelled) return
+        const page = await pdf.getPage(i)
+        const content = await page.getTextContent()
+        const vp = page.getViewport({ scale: 1 })
+        const items: TxtItem[] = content.items
+          .filter((it): it is typeof it & { str: string } => 'str' in it)
+          .map(it => ({
+            str: it.str,
+            x: it.transform[4],
+            y: it.transform[5],
+            w: it.width,
+            h: it.height || Math.abs(it.transform[3]) || 12,
+          }))
+        let fullText = ''
+        const offsets: number[] = []
+        for (const it of items) { offsets.push(fullText.length); fullText += it.str }
+        index.push({ pageNum: i, items, fullText, offsets })
+        void vp // used for side-effect of loading page viewport
+      }
+      if (!cancelled) setTextIndex(index)
+    })()
+    return () => { cancelled = true }
+  }, [pdfData])
+
+  // ── Re-run search whenever query or index changes ────────────────────────────
+  useEffect(() => {
+    if (!searchQuery.trim() || textIndex.length === 0) {
+      setAllMatches([]); setMatchIdx(0); return
+    }
+    const q = searchQuery.toLowerCase()
+    const matches: SearchMatch[] = []
+    for (const pt of textIndex) {
+      for (const rect of buildMatchRects(pt, q)) matches.push({ page: pt.pageNum, rect })
+    }
+    setAllMatches(matches)
+    setMatchIdx(0)
+    if (matches.length > 0) setPageNumber(matches[0].page)
+  }, [searchQuery, textIndex])
+
+  // ── Ctrl+F opens search; Escape closes it ───────────────────────────────────
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+        e.preventDefault(); setSearchOpen(true)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  // Focus search input when bar opens
+  useEffect(() => {
+    if (searchOpen) setTimeout(() => searchInputRef.current?.focus(), 30)
+  }, [searchOpen])
+
   // ── Redraw annotation overlay whenever annotations / dims / page change ─────
   useEffect(() => {
     const canvas = overlayRef.current
@@ -110,6 +210,19 @@ export default function Editor() {
     canvas.height = canvasDims.h
     const ctx = canvas.getContext('2d')!
     ctx.clearRect(0, 0, canvas.width, canvas.height)
+
+    // Search highlights — drawn first so annotations appear on top
+    const ptH = canvasDims.h / scale
+    const pageMatches = allMatches.map((m, i) => ({ m, i })).filter(({ m }) => m.page === pageNumber)
+    for (const { m, i } of pageMatches) {
+      ctx.fillStyle = i === matchIdx ? 'rgba(250,204,21,0.65)' : 'rgba(250,204,21,0.28)'
+      ctx.fillRect(
+        m.rect.x * scale,
+        (ptH - m.rect.y - m.rect.h) * scale,
+        m.rect.w * scale,
+        m.rect.h * scale,
+      )
+    }
 
     const pageAnnots = annotations.get(pageNumber) ?? []
     for (const a of pageAnnots) {
@@ -149,7 +262,7 @@ export default function Editor() {
       ctx.stroke()
     }
     ctx.restore()
-  }, [annotations, pageNumber, canvasDims, dragRect, currentPath, tool, color, lineWidth])
+  }, [annotations, pageNumber, canvasDims, dragRect, currentPath, tool, color, lineWidth, allMatches, matchIdx, scale])
 
   // Focus text input when it appears
   useEffect(() => {
@@ -229,6 +342,13 @@ export default function Editor() {
   // ── Viewer helpers ──────────────────────────────────────────────────────────
   const goTo = (n: number) => setPageNumber(Math.max(1, Math.min(n, numPages)))
   const zoom = (d: number) => setScale(s => parseFloat(Math.max(0.5, Math.min(3, s + d)).toFixed(1)))
+
+  const gotoMatch = (delta: number) => {
+    if (!allMatches.length) return
+    const next = (matchIdx + delta + allMatches.length) % allMatches.length
+    setMatchIdx(next)
+    setPageNumber(allMatches[next].page)
+  }
   const fitWidth = () => {
     if (viewerRef.current) setScale((viewerRef.current.clientWidth - 80) / 595)
   }
@@ -498,10 +618,50 @@ export default function Editor() {
                 <TBtn onClick={() => rotatePage('cw')} title="Rotate CW"><RotateCw size={13} /></TBtn>
                 <TBtn onClick={deletePage} disabled={numPages <= 1} title="Delete page"><Trash2 size={13} /></TBtn>
 
+                <Sep />
+
+                {/* Search */}
+                <TBtn onClick={() => setSearchOpen(o => !o)} active={searchOpen} title="Search (Ctrl+F)">
+                  <Search size={13} />
+                  {allMatches.length > 0 && <span style={{ fontSize: 10 }}>{allMatches.length}</span>}
+                </TBtn>
+
                 {pageAnnotCount > 0 && (
                   <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)' }}>{pageAnnotCount} annotation{pageAnnotCount !== 1 ? 's' : ''}</span>
                 )}
               </div>
+
+              {/* Search bar */}
+              <AnimatePresence>
+                {searchOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}
+                    transition={{ duration: 0.15 }}
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', borderRadius: 10, background: 'rgba(15,12,41,0.92)', border: '1px solid rgba(255,255,255,0.15)', flexShrink: 0 }}
+                  >
+                    <Search size={14} color="var(--text-muted)" style={{ flexShrink: 0 }} />
+                    <input
+                      ref={searchInputRef}
+                      value={searchQuery}
+                      onChange={e => setSearchQuery(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') gotoMatch(e.shiftKey ? -1 : 1)
+                        if (e.key === 'Escape') { setSearchOpen(false); setSearchQuery('') }
+                      }}
+                      placeholder="Search in PDF…"
+                      style={{ background: 'none', border: 'none', color: 'var(--text-primary)', fontSize: 14, outline: 'none', flex: 1, minWidth: 160 }}
+                    />
+                    {searchQuery && (
+                      <span style={{ fontSize: 12, color: allMatches.length ? 'var(--text-muted)' : '#ef4444', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                        {allMatches.length ? `${matchIdx + 1} / ${allMatches.length}` : 'No results'}
+                      </span>
+                    )}
+                    <TBtn onClick={() => gotoMatch(-1)} disabled={!allMatches.length} title="Previous (Shift+Enter)"><ChevronUp size={13} /></TBtn>
+                    <TBtn onClick={() => gotoMatch(1)}  disabled={!allMatches.length} title="Next (Enter)"><ChevronDown size={13} /></TBtn>
+                    <TBtn onClick={() => { setSearchOpen(false); setSearchQuery('') }} title="Close (Esc)"><X size={13} /></TBtn>
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
               {/* PDF viewer + overlay */}
               <div ref={viewerRef} style={{ flex: 1, overflow: 'auto', borderRadius: 14, background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.08)', padding: 24 }}>
