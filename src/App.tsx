@@ -3,6 +3,7 @@ import TitleBar from './components/TitleBar'
 import Home from './pages/Home'
 import Editor from './pages/Editor'
 import Converter from './pages/Converter'
+import ImportPDF from './pages/ImportPDF'
 import './styles/glass.css'
 
 export default function App() {
@@ -24,6 +25,7 @@ export default function App() {
           <Route path="/" element={<Home />} />
           <Route path="/editor" element={<Editor />} />
           <Route path="/convert" element={<Converter />} />
+          <Route path="/import" element={<ImportPDF />} />
         </Routes>
       </div>
     </div>

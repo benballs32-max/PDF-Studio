@@ -324,7 +324,7 @@ export default function Editor() {
     setIsDragActive(false)
     const paths = Array.from(e.dataTransfer.files)
       .filter(f => f.name.toLowerCase().endsWith('.pdf'))
-      .map(f => (f as unknown as { path: string }).path)
+      .map(f => window.electronAPI!.getPathForFile(f))
       .filter(Boolean)
     if (paths.length) addFiles(paths)
   }

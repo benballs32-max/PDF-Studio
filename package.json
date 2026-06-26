@@ -7,8 +7,9 @@
     "dev": "vite",
     "build:renderer": "tsc -p tsconfig.renderer.json && vite build",
     "build:electron": "tsc -p tsconfig.electron.json",
+    "build:python": "pyinstaller python/pdf_engine.spec --distpath python/dist --workpath python/build --noconfirm",
     "build": "npm run build:renderer && npm run build:electron",
-    "dist": "npm run build && electron-builder",
+    "dist": "npm run build && npm run build:python && electron-builder",
     "preview": "vite preview"
   },
   "keywords": [],
@@ -46,17 +47,22 @@
     },
     "files": [
       "dist/**/*",
-      "dist-electron/**/*",
-      "python/**/*"
+      "dist-electron/**/*"
     ],
     "win": {
       "target": "nsis",
       "icon": "public/icon.ico"
     },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
     "extraResources": [
       {
-        "from": "python",
-        "to": "python"
+        "from": "python/dist/pdf_engine",
+        "to": "pdf_engine"
       }
     ]
   }

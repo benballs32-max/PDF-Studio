@@ -25,10 +25,10 @@ Cross off items as they are completed.
 - [x] Headers & footers across all pages (with separator line)
 - [x] Page numbering (6 positions, configurable start number)
 
-## Phase 4 — Inbound Conversions
-- [ ] Images (PNG / JPG) → PDF
-- [ ] Word / PowerPoint / Excel → PDF
-- [ ] Webpage (URL) → PDF
+## Phase 4 — Inbound Conversions ✅ DONE
+- [x] Images (PNG / JPG / BMP / TIFF / WebP) → PDF
+- [x] Word / PowerPoint / Excel → PDF
+- [x] Webpage (URL) → PDF
 
 ## Phase 5 — Security & Compliance
 - [ ] Redaction — permanently black out sensitive text & images

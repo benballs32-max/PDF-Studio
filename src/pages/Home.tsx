@@ -3,7 +3,7 @@ import { motion } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
 import {
   FileText, Wand2, ArrowRightLeft, Scissors, Merge, RotateCw,
-  FileImage, FileType, FileSpreadsheet, Globe, ChevronRight, Clock, X,
+  FileImage, FileType, FileSpreadsheet, Globe, ChevronRight, Clock, X, Plus,
 } from 'lucide-react'
 import { getRecentFiles, addRecentFile, removeRecentFile, clearRecentFiles, type RecentFile } from '../utils/recentFiles'
 
@@ -69,6 +69,30 @@ const tools = [
     description: 'Extract all text content from your PDF',
     route: '/convert',
     color: '#ec4899',
+  },
+]
+
+const createTools = [
+  {
+    icon: <FileImage size={22} />,
+    label: 'Images → PDF',
+    description: 'Convert PNG, JPG, BMP, TIFF, WebP into a PDF',
+    route: '/import?tab=images',
+    color: '#f59e0b',
+  },
+  {
+    icon: <FileType size={22} />,
+    label: 'Office → PDF',
+    description: 'Turn Word, PowerPoint and Excel files into PDF',
+    route: '/import?tab=office',
+    color: '#3b82f6',
+  },
+  {
+    icon: <Globe size={22} />,
+    label: 'Web → PDF',
+    description: 'Capture any webpage as a PDF document',
+    route: '/import?tab=web',
+    color: '#10b981',
   },
 ]
 
@@ -164,6 +188,21 @@ export default function Home() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
           {tools.map((tool, i) => (
             <ToolCard key={tool.label} tool={tool} index={i + 3} onClick={() => navigate(tool.route)} />
+          ))}
+        </div>
+      </div>
+
+      {/* Create PDF section */}
+      <div>
+        <motion.p
+          initial="hidden" animate="show" custom={9} variants={fadeUp}
+          style={{ fontSize: 12, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 6 }}
+        >
+          <Plus size={12} /> Create PDF
+        </motion.p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+          {createTools.map((tool, i) => (
+            <ToolCard key={tool.label} tool={tool} index={i + 9} onClick={() => navigate(tool.route)} />
           ))}
         </div>
       </div>

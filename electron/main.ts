@@ -6,13 +6,20 @@ import { tmpdir } from 'os'
 
 let mainWindow: BrowserWindow | null = null
 
-function pythonScriptPath(): string {
-  // In dev: dist-electron/../python; in prod: resources/python
-  try {
-    const prod = join(process.resourcesPath, 'python', 'pdf_engine.py')
-    return prod
-  } catch {
-    return join(__dirname, '..', 'python', 'pdf_engine.py')
+/** Returns [executable, args-prefix] for the Python sidecar.
+ *  Dev:  python  pdf_engine.py  <payload>
+ *  Prod: resources/pdf_engine/pdf_engine.exe  <payload>  (PyInstaller bundle)
+ */
+function sidecar(): { bin: string; prefix: string[] } {
+  if (process.env.VITE_DEV_SERVER_URL) {
+    return {
+      bin: 'python',
+      prefix: [join(__dirname, '..', 'python', 'pdf_engine.py')],
+    }
+  }
+  return {
+    bin: join(process.resourcesPath, 'pdf_engine', 'pdf_engine.exe'),
+    prefix: [],
   }
 }
 
@@ -73,6 +80,15 @@ ipcMain.on('window:maximize', () => {
 })
 ipcMain.on('window:close', () => mainWindow?.close())
 
+// IPC: open file dialog (generic, with caller-supplied filters)
+ipcMain.handle('dialog:openFiles', async (_, filters: { name: string; extensions: string[] }[], multiple: boolean) => {
+  const result = await dialog.showOpenDialog(mainWindow!, {
+    properties: multiple ? ['openFile', 'multiSelections'] : ['openFile'],
+    filters,
+  })
+  return result.filePaths
+})
+
 // IPC: open file dialog
 ipcMain.handle('dialog:openPDF', async () => {
   const result = await dialog.showOpenDialog(mainWindow!, {
@@ -123,12 +139,11 @@ ipcMain.handle('shell:showItem', async (_, path: string) => {
 
 // IPC: run python command
 ipcMain.handle('pdf:command', async (_, cmd: string, args: object) => {
-  const script = process.env.VITE_DEV_SERVER_URL
-    ? join(__dirname, '..', 'python', 'pdf_engine.py')
-    : pythonScriptPath()
+  const { bin, prefix } = sidecar()
+  const payload = JSON.stringify({ cmd, ...args })
 
   return new Promise((resolve, reject) => {
-    const proc = spawn('python', [script, JSON.stringify({ cmd, ...args })])
+    const proc = spawn(bin, [...prefix, payload])
 
     let stdout = ''
     let stderr = ''

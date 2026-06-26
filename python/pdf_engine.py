@@ -204,6 +204,67 @@ _STAMP_COLORS = {
     'VOID':     (0.45, 0.0, 0.0),
 }
 
+def images_to_pdf(images: list, output: str, **_):
+    import fitz
+    doc = fitz.open()
+    for img_path in images:
+        imgdoc = fitz.open(img_path)
+        pdfbytes = imgdoc.convert_to_pdf()
+        imgpdf = fitz.open("pdf", pdfbytes)
+        doc.insert_pdf(imgpdf)
+        imgdoc.close(); imgpdf.close()
+    doc.save(output)
+    return {"success": True, "pages": len(doc)}
+
+def office_to_pdf(input: str, output: str, **_):
+    import shutil, subprocess, os
+    for exe_name in ('libreoffice', 'soffice'):
+        exe = shutil.which(exe_name)
+        if exe:
+            out_dir = os.path.dirname(os.path.abspath(output))
+            subprocess.run([exe, '--headless', '--convert-to', 'pdf',
+                            '--outdir', out_dir, input],
+                           check=True, capture_output=True, timeout=120)
+            base = os.path.splitext(os.path.basename(input))[0]
+            generated = os.path.join(out_dir, base + '.pdf')
+            if os.path.abspath(generated) != os.path.abspath(output):
+                os.replace(generated, output)
+            return {"success": True}
+    try:
+        from docx2pdf import convert as d2p
+        d2p(input, output)
+        return {"success": True}
+    except ImportError:
+        pass
+    raise RuntimeError(
+        "No Office conversion tool found. "
+        "Install LibreOffice (free) or run: pip install docx2pdf (requires Microsoft Office)"
+    )
+
+def url_to_pdf(url: str, output: str, **_):
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            browser = p.chromium.launch()
+            page = browser.new_page()
+            page.goto(url, wait_until='networkidle', timeout=30000)
+            page.pdf(path=output, format='A4', print_background=True)
+            browser.close()
+        return {"success": True}
+    except ImportError:
+        pass
+    try:
+        from weasyprint import HTML
+        HTML(url).write_pdf(output)
+        return {"success": True}
+    except ImportError:
+        pass
+    raise RuntimeError(
+        "No web-to-PDF tool found. Install one of:\n"
+        "  pip install playwright && playwright install chromium\n"
+        "  pip install weasyprint"
+    )
+
 def add_watermark(input: str, output: str, text: str, opacity: float = 0.3,
                   angle: float = 45, font_size: float = 60, color: list = None, **_):
     import fitz, math
@@ -339,6 +400,9 @@ COMMANDS = {
     "rotate_page": rotate_page,
     "delete_page": delete_page,
     "apply_annotations": apply_annotations,
+    "images_to_pdf": images_to_pdf,
+    "office_to_pdf": office_to_pdf,
+    "url_to_pdf": url_to_pdf,
     "add_watermark": add_watermark,
     "add_stamp": add_stamp,
     "add_header_footer": add_header_footer,

@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 contextBridge.exposeInMainWorld('electronAPI', {
   // Window controls
@@ -20,4 +20,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // PDF processing
   pdfCommand: (cmd: string, args: object) =>
     ipcRenderer.invoke('pdf:command', cmd, args),
+
+  // Get absolute file path from a File object (Electron 28+ replacement for File.path)
+  getPathForFile: (file: File) => webUtils.getPathForFile(file),
+
+  // Open a native file picker and return chosen paths
+  openFiles: (filters: { name: string; extensions: string[] }[], multiple: boolean) =>
+    ipcRenderer.invoke('dialog:openFiles', filters, multiple),
 })
