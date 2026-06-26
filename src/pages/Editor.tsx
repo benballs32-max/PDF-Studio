@@ -8,6 +8,7 @@ import {
   ZoomIn, ZoomOut, Maximize2, X, Save, RotateCw, Trash2,
   MousePointer, Highlighter, PenLine, Type, Eraser,
   Search, ChevronUp, ChevronDown, Crop, LayoutGrid, FilePlus, CheckSquare,
+  BookOpen, MessageSquare,
 } from 'lucide-react'
 import 'react-pdf/dist/Page/AnnotationLayer.css'
 import 'react-pdf/dist/Page/TextLayer.css'
@@ -102,7 +103,7 @@ export default function Editor() {
   const [matchIdx, setMatchIdx] = useState(0)
 
   // Page management
-  const [leftTab, setLeftTab] = useState<'files' | 'pages'>('files')
+  const [leftTab, setLeftTab] = useState<'files' | 'pages' | 'outline' | 'comments'>('files')
   const [selectedPages, setSelectedPages] = useState<Set<number>>(new Set())
   const [dragPage, setDragPage] = useState<number | null>(null)
   const [dragOverPage, setDragOverPage] = useState<number | null>(null)
@@ -688,44 +689,63 @@ export default function Editor() {
         ) : (
           <motion.div key="editor" initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{ flex: 1, display: 'flex', gap: 10, overflow: 'hidden' }}>
 
-            {/* Left: Files / Pages tabs */}
-            <div className="glass" style={{ width: 182, borderRadius: 14, display: 'flex', flexDirection: 'column', flexShrink: 0, overflow: 'hidden' }}>
+            {/* Left: 4-tab panel */}
+            <div className="glass" style={{ width: 190, borderRadius: 14, display: 'flex', flexDirection: 'column', flexShrink: 0, overflow: 'hidden' }}>
+              {/* Icon-only tab bar */}
               <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.1)', flexShrink: 0 }}>
-                {(['files', 'pages'] as const).map(tab => (
-                  <button key={tab} onClick={() => setLeftTab(tab)} style={{ flex: 1, padding: '9px 0', background: 'none', border: 'none', borderBottom: leftTab === tab ? '2px solid #6366f1' : '2px solid transparent', cursor: 'pointer', fontSize: 11, fontWeight: leftTab === tab ? 700 : 500, color: leftTab === tab ? '#a5b4fc' : 'var(--text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
-                    {tab === 'files' ? <><FileText size={10} />Files</> : <><LayoutGrid size={10} />Pages</>}
+                {([
+                  { id: 'files',    icon: <FileText size={13} />,     label: 'Files' },
+                  { id: 'pages',    icon: <LayoutGrid size={13} />,   label: 'Pages' },
+                  { id: 'outline',  icon: <BookOpen size={13} />,     label: 'Outline' },
+                  { id: 'comments', icon: <MessageSquare size={13} />, label: 'Comments' },
+                ] as { id: typeof leftTab; icon: React.ReactNode; label: string }[]).map(({ id, icon, label }) => (
+                  <button key={id} onClick={() => setLeftTab(id)} title={label} style={{ flex: 1, padding: '9px 0', background: 'none', border: 'none', borderBottom: leftTab === id ? '2px solid #6366f1' : '2px solid transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: leftTab === id ? '#a5b4fc' : 'var(--text-muted)', transition: 'color 0.12s' }}>
+                    {icon}
                   </button>
                 ))}
               </div>
-              <div style={{ flex: 1, overflowY: 'auto', padding: leftTab === 'files' ? 8 : '6px 6px', display: 'flex', flexDirection: 'column', gap: leftTab === 'files' ? 5 : 0 }}>
-                {leftTab === 'files' ? (
-                  files.map(f => {
-                    const name = f.split(/[\\/]/).pop() ?? f
-                    const active = f === activeFile
-                    return (
-                      <div key={f} onClick={() => switchFile(f)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 8px', borderRadius: 8, cursor: 'pointer', background: active ? 'rgba(99,102,241,0.18)' : 'rgba(255,255,255,0.05)', border: `1px solid ${active ? 'rgba(99,102,241,0.4)' : 'transparent'}` }}>
-                        <FileText size={12} color={active ? '#818cf8' : 'var(--text-muted)'} style={{ flexShrink: 0 }} />
-                        <span style={{ fontSize: 11, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: active ? '#c7d2fe' : 'var(--text-secondary)' }}>{name}</span>
-                        <button onClick={e => removeFile(f, e)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 1, display: 'flex', flexShrink: 0 }}><X size={10} /></button>
-                      </div>
-                    )
-                  })
-                ) : (
-                  <ThumbnailPanel
-                    pdfData={pdfData}
-                    numPages={numPages}
-                    pageNumber={pageNumber}
-                    onPageClick={p => { setPageNumber(p); setPendingCrop(null) }}
-                    selectedPages={selectedPages}
-                    onToggleSelect={togglePageSelect}
-                    dragPage={dragPage}
-                    onDragPage={setDragPage}
-                    dragOverPage={dragOverPage}
-                    onDragOverPage={setDragOverPage}
-                    onReorder={reorderPagesAction}
-                    onExtract={extractSelectedPages}
-                    onInsert={insertPagesAction}
-                  />
+
+              {/* Tab content */}
+              <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                {leftTab === 'files' && (
+                  <div style={{ flex: 1, overflowY: 'auto', padding: 8, display: 'flex', flexDirection: 'column', gap: 5 }}>
+                    {files.map(f => {
+                      const name = f.split(/[\\/]/).pop() ?? f
+                      const active = f === activeFile
+                      return (
+                        <div key={f} onClick={() => switchFile(f)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 8px', borderRadius: 8, cursor: 'pointer', background: active ? 'rgba(99,102,241,0.18)' : 'rgba(255,255,255,0.05)', border: `1px solid ${active ? 'rgba(99,102,241,0.4)' : 'transparent'}` }}>
+                          <FileText size={12} color={active ? '#818cf8' : 'var(--text-muted)'} style={{ flexShrink: 0 }} />
+                          <span style={{ fontSize: 11, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: active ? '#c7d2fe' : 'var(--text-secondary)' }}>{name}</span>
+                          <button onClick={e => removeFile(f, e)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 1, display: 'flex', flexShrink: 0 }}><X size={10} /></button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+                {leftTab === 'pages' && (
+                  <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', padding: '6px 6px' }}>
+                    <ThumbnailPanel
+                      pdfData={pdfData}
+                      numPages={numPages}
+                      pageNumber={pageNumber}
+                      onPageClick={p => { setPageNumber(p); setPendingCrop(null) }}
+                      selectedPages={selectedPages}
+                      onToggleSelect={togglePageSelect}
+                      dragPage={dragPage}
+                      onDragPage={setDragPage}
+                      dragOverPage={dragOverPage}
+                      onDragOverPage={setDragOverPage}
+                      onReorder={reorderPagesAction}
+                      onExtract={extractSelectedPages}
+                      onInsert={insertPagesAction}
+                    />
+                  </div>
+                )}
+                {leftTab === 'outline' && (
+                  <OutlinePanel sourceFile={activeFile} onPageClick={goTo} />
+                )}
+                {leftTab === 'comments' && (
+                  <CommentsPanel annotations={annotations} pageNumber={pageNumber} onPageClick={goTo} />
                 )}
               </div>
             </div>
@@ -932,6 +952,113 @@ export default function Editor() {
       </AnimatePresence>
     </div>
   )
+}
+
+// ── Outline panel (Bookmarks tab) ────────────────────────────────────────────
+
+interface OutlineItem { level: number; title: string; page: number }
+
+function OutlinePanel({ sourceFile, onPageClick }: {
+  sourceFile: string | null
+  onPageClick: (p: number) => void
+}) {
+  const [outline, setOutline] = useState<OutlineItem[]>([])
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!sourceFile) { setOutline([]); return }
+    setLoading(true)
+    window.electronAPI?.pdfCommand('get_outline', { input: sourceFile })
+      .then(res => {
+        const r = res as { outline?: OutlineItem[] }
+        setOutline(r.outline ?? [])
+      })
+      .catch(() => setOutline([]))
+      .finally(() => setLoading(false))
+  }, [sourceFile])
+
+  if (!sourceFile) return <Empty>No PDF open</Empty>
+  if (loading) return <Empty>Loading…</Empty>
+  if (outline.length === 0) return <Empty>No bookmarks in this PDF</Empty>
+
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 1, padding: '4px 4px' }}>
+      {outline.map((item, i) => (
+        <button
+          key={i}
+          onClick={() => onPageClick(item.page)}
+          title={`${item.title} — p.${item.page}`}
+          style={{
+            display: 'flex', alignItems: 'baseline', gap: 4,
+            paddingLeft: (item.level - 1) * 10 + 6, paddingRight: 6, paddingTop: 4, paddingBottom: 4,
+            background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', borderRadius: 5, width: '100%',
+            color: item.level === 1 ? 'var(--text-primary)' : 'var(--text-secondary)',
+            fontSize: item.level === 1 ? 12 : 11, fontWeight: item.level === 1 ? 600 : 400,
+          }}
+          onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.07)' }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'none' }}
+        >
+          <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.title}</span>
+          <span style={{ fontSize: 10, color: 'var(--text-muted)', flexShrink: 0 }}>{item.page}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// ── Comments panel (Annotations list tab) ────────────────────────────────────
+
+function CommentsPanel({ annotations, pageNumber, onPageClick }: {
+  annotations: Map<number, Annot[]>
+  pageNumber: number
+  onPageClick: (p: number) => void
+}) {
+  const all = Array.from(annotations.entries())
+    .sort(([a], [b]) => a - b)
+    .flatMap(([pg, annots]) => annots.map(a => ({ ...a, pg })))
+
+  if (all.length === 0) {
+    return (
+      <div style={{ padding: 16, color: 'var(--text-muted)', fontSize: 12, textAlign: 'center', lineHeight: 1.6 }}>
+        No annotations yet.<br />
+        <span style={{ fontSize: 11 }}>Use Highlight, Draw or Text tools.</span>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4, padding: '6px 6px' }}>
+      {all.map(a => {
+        const isCurrent = a.pg === pageNumber
+        const TypeIcon = a.type === 'highlight' ? Highlighter : a.type === 'draw' ? PenLine : Type
+        const preview = a.type === 'text' ? a.content : a.type === 'highlight' ? 'Highlight' : 'Drawing'
+        return (
+          <button
+            key={a.id}
+            onClick={() => onPageClick(a.pg)}
+            style={{
+              display: 'flex', flexDirection: 'column', gap: 3,
+              padding: '6px 8px', borderRadius: 6, border: 'none', cursor: 'pointer', textAlign: 'left', width: '100%',
+              background: isCurrent ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.04)',
+              borderLeft: `3px solid ${a.color}`,
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = isCurrent ? 'rgba(99,102,241,0.22)' : 'rgba(255,255,255,0.09)' }}
+            onMouseLeave={e => { e.currentTarget.style.background = isCurrent ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.04)' }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <TypeIcon size={10} color={a.color} />
+              <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Page {a.pg}</span>
+            </div>
+            <span style={{ fontSize: 11, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{preview}</span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function Empty({ children }: { children: React.ReactNode }) {
+  return <div style={{ padding: 14, color: 'var(--text-muted)', fontSize: 12, textAlign: 'center', lineHeight: 1.6 }}>{children}</div>
 }
 
 // ── Thumbnail panel (Pages tab) ──────────────────────────────────────────────

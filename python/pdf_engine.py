@@ -196,6 +196,12 @@ def crop_page(input: str, output: str, page: int, rect: list, **_):
     _save(doc, input, output)
     return {"success": True}
 
+def get_outline(input: str, **_):
+    import fitz
+    doc = fitz.open(input)
+    toc = doc.get_toc()  # [[level, title, page_1based], ...]
+    return {"success": True, "outline": [{"level": t[0], "title": t[1], "page": t[2]} for t in toc]}
+
 def encrypt_pdf(input: str, output: str, password: str, **_):
     import fitz
     doc = fitz.open(input)
@@ -226,6 +232,7 @@ COMMANDS = {
     "rotate_page": rotate_page,
     "delete_page": delete_page,
     "apply_annotations": apply_annotations,
+    "get_outline": get_outline,
     "encrypt_pdf": encrypt_pdf,
     "decrypt_pdf": decrypt_pdf,
     "reorder_pages": reorder_pages,

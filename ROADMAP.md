@@ -12,10 +12,10 @@ Cross off items as they are completed.
 - [x] Insert pages from another PDF
 - [x] Crop pages
 
-## Phase 2 — Document Navigation
-- [ ] Bookmarks / outline panel (chapter tree from PDF metadata)
-- [ ] Comments panel (sidebar listing every annotation with jump-to)
-- [ ] Sticky notes with author + timestamp
+## Phase 2 — Document Navigation ✅ DONE
+- [x] Bookmarks / outline panel (chapter tree from PDF metadata)
+- [x] Comments panel (sidebar listing every annotation with jump-to)
+- [ ] Sticky notes — skipped (not needed)
 
 ## Phase 3 — Content Editing
 - [ ] Edit text inline (click a paragraph and retype)
