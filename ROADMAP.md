@@ -1,5 +1,7 @@
 # PDF Studio — Roadmap
 
+DO NOT PUSH TO GITHUB UNLESS I SAY
+
 Progress tracker for making PDF Studio rival Adobe Acrobat.
 Cross off items as they are completed.
 
@@ -40,10 +42,10 @@ Cross off items as they are completed.
 - [x] Create interactive form fields — text, checkbox, radio, dropdown (draw-to-place tool)
 - [x] Export form data to JSON / CSV; import from JSON / CSV
 
-## Phase 7 — OCR
-- [ ] Tesseract integration to recognise text in scanned / image-based PDFs
-- [ ] Output a searchable text layer over the scan
-- [ ] Scanned docs become searchable via the existing Ctrl+F search
+## Phase 7 — OCR ✅ DONE
+- [x] Tesseract integration to recognise text in scanned / image-based PDFs
+- [x] Output a searchable text layer over the scan (invisible render_mode=3 text via PyMuPDF)
+- [x] Scanned docs become searchable via the existing Ctrl+F search
 
 ## Phase 8 — Advanced
 - [ ] Compare two PDFs (side-by-side visual diff)

@@ -9,7 +9,7 @@ import {
   MousePointer, Highlighter, PenLine, Type, Eraser,
   Search, ChevronUp, ChevronDown, Crop, LayoutGrid, FilePlus, CheckSquare,
   BookOpen, MessageSquare, Layers, EyeOff, Lock,
-  ClipboardList, Circle,
+  ClipboardList, Circle, ScanText,
 } from 'lucide-react'
 import 'react-pdf/dist/Page/AnnotationLayer.css'
 import 'react-pdf/dist/Page/TextLayer.css'
@@ -125,6 +125,7 @@ export default function Editor() {
   const [pendingFormField, setPendingFormField] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
   const [formFieldConfig, setFormFieldConfig] = useState({ name: '', choices: '', value: '' })
   const [formsReloadKey, setFormsReloadKey] = useState(0)
+  const [showOcr, setShowOcr] = useState(false)
 
   const viewerRef = useRef<HTMLDivElement>(null)
   const overlayRef = useRef<HTMLCanvasElement>(null)
@@ -587,6 +588,14 @@ export default function Editor() {
     await reloadPdf()
   }
 
+  const runOcr = async (lang: string, dpi: number) => {
+    const wf = await ensureWorkingCopy()
+    if (!wf) return
+    await window.electronAPI?.pdfCommand('ocr_pdf', { input: wf, output: wf, lang, dpi })
+    await reloadPdf()
+    setShowOcr(false)
+  }
+
   const addFormField = async () => {
     if (!pendingFormField || !activeFile || !formFieldConfig.name.trim()) return
     const wf = await ensureWorkingCopy()
@@ -832,6 +841,13 @@ export default function Editor() {
         )}
       </AnimatePresence>
 
+      {/* OCR modal */}
+      <AnimatePresence>
+        {showOcr && activeFile && (
+          <OcrModal onClose={() => setShowOcr(false)} onRun={runOcr} />
+        )}
+      </AnimatePresence>
+
       <AnimatePresence mode="wait">
         {files.length === 0 ? (
           <motion.div
@@ -1007,6 +1023,11 @@ export default function Editor() {
                 {/* Permissions */}
                 <TBtn onClick={() => setShowPermissions(o => !o)} active={showPermissions} title="PDF Permissions & Password">
                   <Lock size={13} />
+                </TBtn>
+
+                {/* OCR */}
+                <TBtn onClick={() => setShowOcr(o => !o)} active={showOcr} title="OCR — make scanned pages searchable">
+                  <ScanText size={13} />
                 </TBtn>
 
                 <Sep />
@@ -1800,4 +1821,106 @@ function Spinner() {
 
 function ErrBox() {
   return <div style={{ padding: 32, color: '#ef4444', fontSize: 13, textAlign: 'center' }}>Could not load PDF</div>
+}
+
+// ── OCR modal ────────────────────────────────────────────────────────────────
+
+const OCR_LANGUAGES = [
+  { value: 'eng', label: 'English' },
+  { value: 'fra', label: 'French' },
+  { value: 'deu', label: 'German' },
+  { value: 'spa', label: 'Spanish' },
+  { value: 'por', label: 'Portuguese' },
+  { value: 'ita', label: 'Italian' },
+  { value: 'rus', label: 'Russian' },
+  { value: 'chi_sim', label: 'Chinese (Simplified)' },
+  { value: 'chi_tra', label: 'Chinese (Traditional)' },
+  { value: 'jpn', label: 'Japanese' },
+  { value: 'kor', label: 'Korean' },
+  { value: 'ara', label: 'Arabic' },
+]
+
+function OcrModal({ onClose, onRun }: {
+  onClose: () => void
+  onRun: (lang: string, dpi: number) => Promise<void>
+}) {
+  const [lang, setLang] = useState('eng')
+  const [dpi, setDpi] = useState(300)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const DPI_OPTIONS = [
+    { value: 150, label: '150 DPI — fast, draft quality' },
+    { value: 300, label: '300 DPI — recommended' },
+    { value: 600, label: '600 DPI — high quality, slow' },
+  ]
+
+  const run = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      await onRun(lang, dpi)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+      setBusy(false)
+    }
+  }
+
+  return (
+    <>
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        onClick={busy ? undefined : onClose}
+        style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 2000 }} />
+      <div style={{ position: 'fixed', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2001, pointerEvents: 'none' }}>
+        <motion.div
+          initial={{ opacity: 0, scale: 0.94 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.94 }}
+          transition={{ duration: 0.14 }}
+          style={{ width: 380, pointerEvents: 'all', background: 'rgba(10,8,32,0.97)', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 16, overflow: 'hidden', boxShadow: '0 28px 64px rgba(0,0,0,0.55)' }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 16px', borderBottom: '1px solid rgba(255,255,255,0.09)' }}>
+            <ScanText size={14} color="#a5b4fc" />
+            <span style={{ fontWeight: 700, fontSize: 14, flex: 1 }}>OCR — Make Searchable</span>
+            <button onClick={onClose} disabled={busy} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: busy ? 'default' : 'pointer', padding: 2, display: 'flex' }}><X size={14} /></button>
+          </div>
+
+          <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <CtField label="Document language">
+              <CtSelect value={lang} onChange={e => setLang(e.target.value)} disabled={busy}>
+                {OCR_LANGUAGES.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
+              </CtSelect>
+            </CtField>
+
+            <CtField label="Resolution">
+              <CtSelect value={String(dpi)} onChange={e => setDpi(+e.target.value)} disabled={busy}>
+                {DPI_OPTIONS.map(o => <option key={o.value} value={String(o.value)}>{o.label}</option>)}
+              </CtSelect>
+            </CtField>
+
+            {busy && (
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 9, padding: '8px 10px', borderRadius: 7, background: 'rgba(99,102,241,0.07)', border: '1px solid rgba(99,102,241,0.2)' }}>
+                <div style={{ width: 14, height: 14, border: '2px solid rgba(99,102,241,0.3)', borderTopColor: '#6366f1', borderRadius: '50%', animation: 'spin 0.8s linear infinite', flexShrink: 0 }} />
+                Running OCR… this may take a minute for large documents.
+              </div>
+            )}
+
+            {error && (
+              <div style={{ fontSize: 11, color: '#f87171', lineHeight: 1.6, padding: '8px 10px', borderRadius: 7, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', whiteSpace: 'pre-wrap' }}>{error}</div>
+            )}
+
+            {!busy && !error && (
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+                Requires <strong style={{ color: 'var(--text-secondary)' }}>Tesseract</strong> installed on your system. After OCR, scanned pages become searchable with Ctrl+F.
+              </div>
+            )}
+          </div>
+
+          <div style={{ padding: '0 16px 16px' }}>
+            <button onClick={run} disabled={busy} style={{ width: '100%', padding: 10, borderRadius: 10, border: 'none', background: busy ? 'rgba(99,102,241,0.3)' : 'linear-gradient(135deg,#6366f1,#8b5cf6)', color: 'white', fontSize: 13, fontWeight: 700, cursor: busy ? 'default' : 'pointer' }}>
+              {busy ? 'Processing…' : 'Run OCR'}
+            </button>
+          </div>
+        </motion.div>
+      </div>
+    </>
+  )
 }

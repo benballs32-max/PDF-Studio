@@ -462,6 +462,64 @@ def import_form_data(input: str, output: str, source: str, **_):
     _save(doc, input, output)
     return {"success": True}
 
+def ocr_pdf(input: str, output: str, lang: str = 'eng', dpi: int = 300, **_):
+    """Render every page to an image, run Tesseract OCR, and write a searchable PDF
+    with an invisible text layer so Ctrl+F works on scanned documents."""
+    import fitz
+    try:
+        import pytesseract
+        from PIL import Image
+        import io
+    except ImportError:
+        raise RuntimeError(
+            "OCR requires additional packages:\n"
+            "  pip install pytesseract Pillow\n"
+            "Also install Tesseract from:\n"
+            "  https://github.com/UB-Mannheim/tesseract/wiki"
+        )
+
+    src = fitz.open(input)
+    result = fitz.open()
+    inv = 72.0 / dpi
+
+    for page in src:
+        pw, ph = page.rect.width, page.rect.height
+        mat = fitz.Matrix(dpi / 72.0, dpi / 72.0)
+        pix = page.get_pixmap(matrix=mat, alpha=False)
+        img_bytes = pix.tobytes("png")
+        img = Image.open(io.BytesIO(img_bytes))
+
+        new_page = result.new_page(width=pw, height=ph)
+        new_page.insert_image(new_page.rect, stream=img_bytes)
+
+        data = pytesseract.image_to_data(img, lang=lang, output_type=pytesseract.Output.DICT)
+
+        for i in range(len(data['text'])):
+            word = data['text'][i]
+            if not word or not word.strip():
+                continue
+            if int(data['conf'][i]) < 0:
+                continue
+            x0 = data['left'][i] * inv
+            y_top = data['top'][i] * inv
+            h_pt = data['height'][i] * inv
+            if h_pt < 1:
+                continue
+            y_baseline = ph - (y_top + h_pt)
+            new_page.insert_text(
+                fitz.Point(x0, y_baseline),
+                word + ' ',
+                fontsize=h_pt,
+                fontname='helv',
+                color=(0, 0, 0),
+                render_mode=3,
+                overlay=True,
+            )
+
+    src.close()
+    result.save(output)
+    return {"success": True, "pages": len(result)}
+
 def redact_areas(input: str, output: str, page: int, rects: list, **_):
     """Permanently black out the given rectangles on a page (irreversible)."""
     import fitz
@@ -538,6 +596,7 @@ COMMANDS = {
     "add_form_field": add_form_field,
     "export_form_data": export_form_data,
     "import_form_data": import_form_data,
+    "ocr_pdf": ocr_pdf,
     "redact_areas": redact_areas,
     "set_permissions": set_permissions,
     "encrypt_pdf": encrypt_pdf,
