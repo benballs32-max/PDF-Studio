@@ -938,116 +938,23 @@ export default function Editor() {
             {/* Centre: toolbar + viewer */}
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8, overflow: 'hidden' }}>
 
-              {/* Toolbar row */}
-              <div style={{ borderRadius: 10, padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, flexWrap: 'wrap', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)' }}>
-                {/* Page nav */}
+              {/* Toolbar row — navigation & zoom only; editing tools are in the right sidebar */}
+              <div style={{ borderRadius: 10, padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)' }}>
                 <TBtn onClick={() => goTo(pageNumber - 1)} disabled={pageNumber <= 1}><ChevronLeft size={13} /></TBtn>
                 <span style={{ fontSize: 12, color: 'var(--text-secondary)', minWidth: 60, textAlign: 'center' }}>
                   {numPages > 0 ? `${pageNumber} / ${numPages}` : '—'}
                 </span>
                 <TBtn onClick={() => goTo(pageNumber + 1)} disabled={pageNumber >= numPages}><ChevronRight size={13} /></TBtn>
-
                 <Sep />
-
-                {/* Zoom */}
                 <TBtn onClick={() => zoom(-0.1)}><ZoomOut size={13} /></TBtn>
                 <span style={{ fontSize: 12, color: 'var(--text-secondary)', minWidth: 38, textAlign: 'center' }}>{Math.round(scale * 100)}%</span>
                 <TBtn onClick={() => zoom(0.1)}><ZoomIn size={13} /></TBtn>
-                <TBtn onClick={fitWidth}><Maximize2 size={12} /></TBtn>
-
+                <TBtn onClick={fitWidth} title="Fit to width"><Maximize2 size={12} /></TBtn>
                 <Sep />
-
-                {/* Editing tools */}
-                {([
-                  ['select', <MousePointer size={13} />, 'Select'],
-                  ['highlight', <Highlighter size={13} />, 'Highlight'],
-                  ['draw', <PenLine size={13} />, 'Draw'],
-                  ['text', <Type size={13} />, 'Text'],
-                  ['erase', <Eraser size={13} />, 'Erase'],
-                  ['crop', <Crop size={13} />, 'Crop Page'],
-                ] as [Tool, React.ReactNode, string][]).map(([t, icon, label]) => (
-                  <TBtn key={t} onClick={() => setTool(t)} active={tool === t} title={label}>{icon}</TBtn>
-                ))}
-
-                <Sep />
-
-                {/* Color swatches */}
-                {COLORS.map(c => (
-                  <button
-                    key={c}
-                    onClick={() => setColor(c)}
-                    title={c}
-                    style={{ width: 18, height: 18, borderRadius: '50%', background: c, border: color === c ? '2px solid white' : '2px solid transparent', cursor: 'pointer', flexShrink: 0 }}
-                  />
-                ))}
-
-                <Sep />
-
-                {/* Line width */}
-                {[2, 4, 7].map(w => (
-                  <button
-                    key={w}
-                    onClick={() => setLineWidth(w)}
-                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 6, background: lineWidth === w ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.07)', border: `1px solid ${lineWidth === w ? 'rgba(99,102,241,0.5)' : 'rgba(255,255,255,0.1)'}`, cursor: 'pointer' }}
-                  >
-                    <div style={{ width: w + 8, height: w, background: 'white', borderRadius: 99 }} />
-                  </button>
-                ))}
-
-                <Sep />
-
-                {/* Page actions */}
-                <TBtn onClick={() => rotatePage('cw')} title="Rotate CW"><RotateCw size={13} /></TBtn>
-                <TBtn onClick={deletePage} disabled={numPages <= 1} title="Delete page"><Trash2 size={13} /></TBtn>
-
-                <Sep />
-
-                {/* Search */}
                 <TBtn onClick={() => setSearchOpen(o => !o)} active={searchOpen} title="Search (Ctrl+F)">
                   <Search size={13} />
                   {allMatches.length > 0 && <span style={{ fontSize: 10 }}>{allMatches.length}</span>}
                 </TBtn>
-
-                <Sep />
-
-                {/* Content Tools */}
-                <TBtn onClick={() => setShowContentTools(o => !o)} active={showContentTools} title="Content Tools (watermark, stamp, header/footer, page numbers)">
-                  <Layers size={13} />
-                </TBtn>
-
-                {/* Redact */}
-                <TBtn onClick={() => setTool('redact')} active={tool === 'redact'} title="Redact — permanently hide content">
-                  <EyeOff size={13} />
-                </TBtn>
-
-                {/* Permissions */}
-                <TBtn onClick={() => setShowPermissions(o => !o)} active={showPermissions} title="PDF Permissions & Password">
-                  <Lock size={13} />
-                </TBtn>
-
-                {/* OCR */}
-                <TBtn onClick={() => setShowOcr(o => !o)} active={showOcr} title="OCR — make scanned pages searchable">
-                  <ScanText size={13} />
-                </TBtn>
-
-                <Sep />
-
-                {/* Form field creation tool */}
-                <TBtn onClick={() => setTool('formfield')} active={tool === 'formfield'} title="Add Form Field">
-                  <ClipboardList size={13} />
-                </TBtn>
-                {tool === 'formfield' && (<>
-                  {(['text', 'checkbox', 'dropdown', 'radio'] as const).map(ft => (
-                    <button key={ft} onClick={() => setFormFieldType(ft)}
-                      style={{ padding: '4px 7px', borderRadius: 5, border: `1px solid ${formFieldType === ft ? 'rgba(59,130,246,0.6)' : 'rgba(255,255,255,0.1)'}`, background: formFieldType === ft ? 'rgba(59,130,246,0.2)' : 'rgba(255,255,255,0.06)', color: formFieldType === ft ? '#93c5fd' : 'var(--text-muted)', fontSize: 10, fontWeight: 600, cursor: 'pointer' }}>
-                      {ft === 'text' ? 'Text' : ft === 'checkbox' ? 'Check' : ft === 'dropdown' ? 'Drop' : 'Radio'}
-                    </button>
-                  ))}
-                </>)}
-
-                {pageAnnotCount > 0 && (
-                  <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)' }}>{pageAnnotCount} annotation{pageAnnotCount !== 1 ? 's' : ''}</span>
-                )}
               </div>
 
               {/* Search bar */}
@@ -1217,9 +1124,134 @@ export default function Editor() {
                 </div>
               </div>
             </div>
+
+            {/* Right: tools sidebar */}
+            <div className="glass" style={{ width: 210, borderRadius: 14, display: 'flex', flexDirection: 'column', flexShrink: 0, overflow: 'hidden' }}>
+              <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', paddingBottom: 10 }}>
+
+                <SbSection title={`Annotate${pageAnnotCount > 0 ? ` · ${pageAnnotCount}` : ''}`}>
+                  <SbTool icon={<MousePointer size={14} />} label="Select" sublabel="Pan & interact" active={tool === 'select'} onClick={() => setTool('select')} />
+                  <SbTool icon={<Highlighter size={14} />} label="Highlight" sublabel="Drag to highlight text" active={tool === 'highlight'} onClick={() => setTool('highlight')} />
+                  {tool === 'highlight' && <SbColorPicker color={color} onChange={setColor} />}
+                  <SbTool icon={<PenLine size={14} />} label="Draw" sublabel="Freehand pen" active={tool === 'draw'} onClick={() => setTool('draw')} />
+                  {tool === 'draw' && <>
+                    <SbColorPicker color={color} onChange={setColor} />
+                    <SbLineWidth lineWidth={lineWidth} onChange={setLineWidth} />
+                  </>}
+                  <SbTool icon={<Type size={14} />} label="Text" sublabel="Click to add a note" active={tool === 'text'} onClick={() => setTool('text')} />
+                  {tool === 'text' && <SbColorPicker color={color} onChange={setColor} />}
+                  <SbTool icon={<Eraser size={14} />} label="Erase" sublabel="Remove annotations" active={tool === 'erase'} onClick={() => setTool('erase')} />
+                </SbSection>
+
+                <SbSection title="Page">
+                  <SbTool icon={<Crop size={14} />} label="Crop" sublabel="Trim current page" active={tool === 'crop'} onClick={() => setTool('crop')} />
+                  <SbTool icon={<RotateCw size={14} />} label="Rotate" sublabel="Clockwise 90°" onClick={() => rotatePage('cw')} />
+                  <SbTool icon={<Trash2 size={14} />} label="Delete Page" sublabel={numPages <= 1 ? 'Only one page' : `Remove page ${pageNumber}`} disabled={numPages <= 1} onClick={deletePage} />
+                </SbSection>
+
+                <SbSection title="Security">
+                  <SbTool icon={<EyeOff size={14} />} label="Redact" sublabel="Permanently black out content" active={tool === 'redact'} onClick={() => setTool('redact')} />
+                  <SbTool icon={<Lock size={14} />} label="Permissions" sublabel="Restrict print, copy, edit" active={showPermissions} onClick={() => setShowPermissions(o => !o)} />
+                  <SbTool icon={<ScanText size={14} />} label="OCR" sublabel="Make scanned text searchable" active={showOcr} onClick={() => setShowOcr(o => !o)} />
+                </SbSection>
+
+                <SbSection title="Content">
+                  <SbTool icon={<Layers size={14} />} label="Watermark & Stamp" sublabel="Headers, page numbers…" active={showContentTools} onClick={() => setShowContentTools(o => !o)} />
+                </SbSection>
+
+                <SbSection title="Forms">
+                  <SbTool icon={<ClipboardList size={14} />} label="Add Field" sublabel="Draw a form field on page" active={tool === 'formfield'} onClick={() => setTool('formfield')} />
+                  {tool === 'formfield' && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, padding: '2px 10px 6px' }}>
+                      {(['text', 'checkbox', 'dropdown', 'radio'] as const).map(ft => (
+                        <button key={ft} onClick={() => setFormFieldType(ft)}
+                          style={{ padding: '3px 7px', borderRadius: 5, border: `1px solid ${formFieldType === ft ? 'rgba(59,130,246,0.6)' : 'rgba(255,255,255,0.1)'}`, background: formFieldType === ft ? 'rgba(59,130,246,0.2)' : 'rgba(255,255,255,0.05)', color: formFieldType === ft ? '#93c5fd' : 'var(--text-muted)', fontSize: 10, fontWeight: 600, cursor: 'pointer' }}>
+                          {ft === 'text' ? 'Text' : ft === 'checkbox' ? 'Check' : ft === 'dropdown' ? 'Drop' : 'Radio'}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </SbSection>
+
+              </div>
+            </div>
+
           </motion.div>
         )}
       </AnimatePresence>
+    </div>
+  )
+}
+
+// ── Right sidebar helpers ────────────────────────────────────────────────────
+
+function SbSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div style={{ marginTop: 4 }}>
+      <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)', padding: '8px 12px 4px' }}>
+        {title}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 1, padding: '0 6px' }}>
+        {children}
+      </div>
+    </div>
+  )
+}
+
+function SbTool({ icon, label, sublabel, active, disabled, onClick }: {
+  icon: React.ReactNode; label: string; sublabel?: string
+  active?: boolean; disabled?: boolean; onClick: () => void
+}) {
+  return (
+    <button
+      onClick={onClick} disabled={disabled}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 9, padding: '7px 8px', borderRadius: 8,
+        width: '100%', textAlign: 'left', cursor: disabled ? 'default' : 'pointer',
+        background: active ? 'rgba(99,102,241,0.2)' : 'transparent',
+        border: `1px solid ${active ? 'rgba(99,102,241,0.4)' : 'transparent'}`,
+        transition: 'background 0.12s',
+      }}
+      onMouseEnter={e => { if (!disabled && !active) e.currentTarget.style.background = 'rgba(255,255,255,0.07)' }}
+      onMouseLeave={e => { e.currentTarget.style.background = active ? 'rgba(99,102,241,0.2)' : 'transparent' }}
+    >
+      <div style={{ color: active ? '#a5b4fc' : disabled ? 'rgba(255,255,255,0.2)' : 'var(--text-muted)', flexShrink: 0, display: 'flex', alignItems: 'center' }}>
+        {icon}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
+        <span style={{ fontSize: 12, fontWeight: active ? 600 : 400, color: active ? '#c7d2fe' : disabled ? 'rgba(255,255,255,0.25)' : 'var(--text-secondary)', lineHeight: 1.3 }}>
+          {label}
+        </span>
+        {sublabel && (
+          <span style={{ fontSize: 10, color: disabled ? 'rgba(255,255,255,0.15)' : 'var(--text-muted)', lineHeight: 1.3 }}>
+            {sublabel}
+          </span>
+        )}
+      </div>
+    </button>
+  )
+}
+
+function SbColorPicker({ color, onChange }: { color: string; onChange: (c: string) => void }) {
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, padding: '3px 9px 7px' }}>
+      {COLORS.map(c => (
+        <button key={c} onClick={() => onChange(c)} title={c}
+          style={{ width: 18, height: 18, borderRadius: '50%', background: c, border: color === c ? '2px solid white' : '2px solid transparent', cursor: 'pointer', flexShrink: 0 }} />
+      ))}
+    </div>
+  )
+}
+
+function SbLineWidth({ lineWidth, onChange }: { lineWidth: number; onChange: (w: number) => void }) {
+  return (
+    <div style={{ display: 'flex', gap: 5, padding: '0 9px 7px' }}>
+      {[2, 4, 7].map(w => (
+        <button key={w} onClick={() => onChange(w)}
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, height: 24, borderRadius: 5, background: lineWidth === w ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.07)', border: `1px solid ${lineWidth === w ? 'rgba(99,102,241,0.5)' : 'rgba(255,255,255,0.1)'}`, cursor: 'pointer' }}>
+          <div style={{ width: w + 6, height: w, background: 'white', borderRadius: 99 }} />
+        </button>
+      ))}
     </div>
   )
 }
