@@ -7,14 +7,14 @@ import {
   ArrowLeft, Upload, FileText, ChevronLeft, ChevronRight,
   ZoomIn, ZoomOut, Maximize2, X, Save, RotateCw, Trash2,
   MousePointer, Highlighter, PenLine, Type, Eraser,
-  Search, ChevronUp, ChevronDown,
+  Search, ChevronUp, ChevronDown, Crop, LayoutGrid, FilePlus, CheckSquare,
 } from 'lucide-react'
 import 'react-pdf/dist/Page/AnnotationLayer.css'
 import 'react-pdf/dist/Page/TextLayer.css'
 
 pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs'
 
-type Tool = 'select' | 'highlight' | 'draw' | 'text' | 'erase'
+type Tool = 'select' | 'highlight' | 'draw' | 'text' | 'erase' | 'crop'
 type AnnotShape =
   | { type: 'highlight'; x: number; y: number; w: number; h: number; color: string }
   | { type: 'draw'; pts: [number, number][]; color: string; lw: number }
@@ -100,6 +100,13 @@ export default function Editor() {
   const [textIndex, setTextIndex] = useState<PageText[]>([])
   const [allMatches, setAllMatches] = useState<SearchMatch[]>([])
   const [matchIdx, setMatchIdx] = useState(0)
+
+  // Page management
+  const [leftTab, setLeftTab] = useState<'files' | 'pages'>('files')
+  const [selectedPages, setSelectedPages] = useState<Set<number>>(new Set())
+  const [dragPage, setDragPage] = useState<number | null>(null)
+  const [dragOverPage, setDragOverPage] = useState<number | null>(null)
+  const [pendingCrop, setPendingCrop] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
 
   const viewerRef = useRef<HTMLDivElement>(null)
   const overlayRef = useRef<HTMLCanvasElement>(null)
@@ -248,9 +255,25 @@ export default function Editor() {
 
     // Live drag rect / path preview
     ctx.save()
-    if (dragRect && (tool === 'highlight')) {
+    if (dragRect && tool === 'highlight') {
       ctx.fillStyle = color + HIGHLIGHT_ALPHA
       ctx.fillRect(dragRect.x, dragRect.y, dragRect.w, dragRect.h)
+    }
+    if (dragRect && tool === 'crop') {
+      ctx.strokeStyle = 'rgba(99,102,241,0.9)'
+      ctx.lineWidth = 2
+      ctx.setLineDash([6, 3])
+      ctx.strokeRect(dragRect.x, dragRect.y, dragRect.w, dragRect.h)
+      ctx.fillStyle = 'rgba(99,102,241,0.08)'
+      ctx.fillRect(dragRect.x, dragRect.y, dragRect.w, dragRect.h)
+      ctx.setLineDash([])
+    }
+    if (pendingCrop && tool === 'crop') {
+      ctx.strokeStyle = '#6366f1'
+      ctx.lineWidth = 2
+      ctx.setLineDash([6, 3])
+      ctx.strokeRect(pendingCrop.x, pendingCrop.y, pendingCrop.w, pendingCrop.h)
+      ctx.setLineDash([])
     }
     if (currentPath.length > 1 && tool === 'draw') {
       ctx.strokeStyle = color
@@ -262,7 +285,7 @@ export default function Editor() {
       ctx.stroke()
     }
     ctx.restore()
-  }, [annotations, pageNumber, canvasDims, dragRect, currentPath, tool, color, lineWidth, allMatches, matchIdx, scale])
+  }, [annotations, pageNumber, canvasDims, dragRect, currentPath, tool, color, lineWidth, allMatches, matchIdx, scale, pendingCrop])
 
   // Focus text input when it appears
   useEffect(() => {
@@ -349,6 +372,65 @@ export default function Editor() {
     setMatchIdx(next)
     setPageNumber(allMatches[next].page)
   }
+
+  // ── Page management ─────────────────────────────────────────────────────────
+  const reloadPdf = async () => {
+    if (!activeFile) return
+    const data = await window.electronAPI?.readFile(activeFile)
+    if (data) setPdfData(data)
+  }
+
+  const reorderPagesAction = async (fromPage: number, toPage: number) => {
+    if (!activeFile || fromPage === toPage) return
+    const order = Array.from({ length: numPages }, (_, i) => i)
+    order.splice(fromPage - 1, 1)
+    order.splice(toPage - 1, 0, fromPage - 1)
+    await window.electronAPI?.pdfCommand('reorder_pages', { input: activeFile, output: activeFile, order })
+    await reloadPdf()
+    setDragPage(null); setDragOverPage(null)
+  }
+
+  const extractSelectedPages = async () => {
+    if (!activeFile || selectedPages.size === 0) return
+    const out = await window.electronAPI?.savePath('pdf')
+    if (!out) return
+    const pages = [...selectedPages].sort((a, b) => a - b).map(p => p - 1)
+    await window.electronAPI?.pdfCommand('extract_pages', { input: activeFile, output: out, pages })
+    window.electronAPI?.showItem(out)
+    setSelectedPages(new Set())
+  }
+
+  const insertPagesAction = async () => {
+    if (!activeFile) return
+    const paths = await window.electronAPI?.openPDF()
+    if (!paths?.[0]) return
+    await window.electronAPI?.pdfCommand('insert_pages', {
+      input: activeFile, output: activeFile, source: paths[0], position: pageNumber,
+    })
+    await reloadPdf()
+  }
+
+  const applyCrop = async () => {
+    if (!pendingCrop || !activeFile || !canvasDims) return
+    const ptH = canvasDims.h / scale
+    const x0 = pendingCrop.x / scale
+    const y0 = ptH - (pendingCrop.y + pendingCrop.h) / scale
+    const x1 = (pendingCrop.x + pendingCrop.w) / scale
+    const y1 = ptH - pendingCrop.y / scale
+    await window.electronAPI?.pdfCommand('crop_page', {
+      input: activeFile, output: activeFile, page: pageNumber - 1, rect: [x0, y0, x1, y1],
+    })
+    setPendingCrop(null)
+    await reloadPdf()
+  }
+
+  const togglePageSelect = (p: number) => {
+    setSelectedPages(prev => {
+      const next = new Set(prev)
+      next.has(p) ? next.delete(p) : next.add(p)
+      return next
+    })
+  }
   const fitWidth = () => {
     if (viewerRef.current) setScale((viewerRef.current.clientWidth - 80) / 595)
   }
@@ -392,12 +474,13 @@ export default function Editor() {
     if (tool === 'erase') { eraseAt(x, y); return }
     if (tool === 'highlight') { setDragRect({ x, y, w: 0, h: 0 }); setDrawing(true); return }
     if (tool === 'draw') { setCurrentPath([[x, y]]); setDrawing(true); return }
+    if (tool === 'crop') { setPendingCrop(null); setDragRect({ x, y, w: 0, h: 0 }); setDrawing(true); return }
   }
 
   const onMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!drawing) return
     const [x, y] = relPos(e)
-    if (tool === 'highlight' && dragRect) {
+    if ((tool === 'highlight' || tool === 'crop') && dragRect) {
       setDragRect({ x: dragRect.x, y: dragRect.y, w: x - dragRect.x, h: y - dragRect.y })
     }
     if (tool === 'draw') {
@@ -416,6 +499,11 @@ export default function Editor() {
     }
     if (tool === 'draw' && currentPath.length > 1) {
       addAnnot({ type: 'draw', pts: currentPath, color, lw: lineWidth })
+    }
+    if (tool === 'crop' && dragRect && Math.abs(dragRect.w) > 10 && Math.abs(dragRect.h) > 10) {
+      const x = dragRect.w < 0 ? dragRect.x + dragRect.w : dragRect.x
+      const y = dragRect.h < 0 ? dragRect.y + dragRect.h : dragRect.y
+      setPendingCrop({ x, y, w: Math.abs(dragRect.w), h: Math.abs(dragRect.h) })
     }
     setDragRect(null)
     setCurrentPath([])
@@ -486,7 +574,7 @@ export default function Editor() {
   }
 
   const cursorFor: Record<Tool, string> = {
-    select: 'default', highlight: 'crosshair', draw: 'crosshair', text: 'text', erase: 'cell',
+    select: 'default', highlight: 'crosshair', draw: 'crosshair', text: 'text', erase: 'cell', crop: 'crosshair',
   }
 
   const pageAnnotCount = (annotations.get(pageNumber) ?? []).length
@@ -538,20 +626,46 @@ export default function Editor() {
         ) : (
           <motion.div key="editor" initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{ flex: 1, display: 'flex', gap: 10, overflow: 'hidden' }}>
 
-            {/* Left: file list */}
-            <div className="glass" style={{ width: 170, borderRadius: 14, padding: 10, display: 'flex', flexDirection: 'column', gap: 5, overflowY: 'auto', flexShrink: 0 }}>
-              <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)', paddingBottom: 6 }}>Files</p>
-              {files.map(f => {
-                const name = f.split(/[\\/]/).pop() ?? f
-                const active = f === activeFile
-                return (
-                  <div key={f} onClick={() => switchFile(f)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 8px', borderRadius: 8, cursor: 'pointer', background: active ? 'rgba(99,102,241,0.18)' : 'rgba(255,255,255,0.05)', border: `1px solid ${active ? 'rgba(99,102,241,0.4)' : 'transparent'}` }}>
-                    <FileText size={12} color={active ? '#818cf8' : 'var(--text-muted)'} style={{ flexShrink: 0 }} />
-                    <span style={{ fontSize: 11, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: active ? '#c7d2fe' : 'var(--text-secondary)' }}>{name}</span>
-                    <button onClick={e => removeFile(f, e)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 1, display: 'flex', flexShrink: 0 }}><X size={10} /></button>
-                  </div>
-                )
-              })}
+            {/* Left: Files / Pages tabs */}
+            <div className="glass" style={{ width: 182, borderRadius: 14, display: 'flex', flexDirection: 'column', flexShrink: 0, overflow: 'hidden' }}>
+              <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.1)', flexShrink: 0 }}>
+                {(['files', 'pages'] as const).map(tab => (
+                  <button key={tab} onClick={() => setLeftTab(tab)} style={{ flex: 1, padding: '9px 0', background: 'none', border: 'none', borderBottom: leftTab === tab ? '2px solid #6366f1' : '2px solid transparent', cursor: 'pointer', fontSize: 11, fontWeight: leftTab === tab ? 700 : 500, color: leftTab === tab ? '#a5b4fc' : 'var(--text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+                    {tab === 'files' ? <><FileText size={10} />Files</> : <><LayoutGrid size={10} />Pages</>}
+                  </button>
+                ))}
+              </div>
+              <div style={{ flex: 1, overflowY: 'auto', padding: leftTab === 'files' ? 8 : '6px 6px', display: 'flex', flexDirection: 'column', gap: leftTab === 'files' ? 5 : 0 }}>
+                {leftTab === 'files' ? (
+                  files.map(f => {
+                    const name = f.split(/[\\/]/).pop() ?? f
+                    const active = f === activeFile
+                    return (
+                      <div key={f} onClick={() => switchFile(f)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 8px', borderRadius: 8, cursor: 'pointer', background: active ? 'rgba(99,102,241,0.18)' : 'rgba(255,255,255,0.05)', border: `1px solid ${active ? 'rgba(99,102,241,0.4)' : 'transparent'}` }}>
+                        <FileText size={12} color={active ? '#818cf8' : 'var(--text-muted)'} style={{ flexShrink: 0 }} />
+                        <span style={{ fontSize: 11, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: active ? '#c7d2fe' : 'var(--text-secondary)' }}>{name}</span>
+                        <button onClick={e => removeFile(f, e)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 1, display: 'flex', flexShrink: 0 }}><X size={10} /></button>
+                      </div>
+                    )
+                  })
+                ) : (
+                  <ThumbnailPanel
+                    pdfData={pdfData}
+                    numPages={numPages}
+                    pageNumber={pageNumber}
+                    onPageClick={p => { setPageNumber(p); setPendingCrop(null) }}
+                    selectedPages={selectedPages}
+                    onToggleSelect={togglePageSelect}
+                    dragPage={dragPage}
+                    onDragPage={setDragPage}
+                    dragOverPage={dragOverPage}
+                    onDragOverPage={setDragOverPage}
+                    onReorder={reorderPagesAction}
+                    onExtract={extractSelectedPages}
+                    onInsert={insertPagesAction}
+                  />
+                )}
+              </div>
             </div>
 
             {/* Centre: toolbar + viewer */}
@@ -583,6 +697,7 @@ export default function Editor() {
                   ['draw', <PenLine size={13} />, 'Draw'],
                   ['text', <Type size={13} />, 'Text'],
                   ['erase', <Eraser size={13} />, 'Erase'],
+                  ['crop', <Crop size={13} />, 'Crop Page'],
                 ] as [Tool, React.ReactNode, string][]).map(([t, icon, label]) => (
                   <TBtn key={t} onClick={() => setTool(t)} active={tool === t} title={label}>{icon}</TBtn>
                 ))}
@@ -711,7 +826,7 @@ export default function Editor() {
 
                         {/* Floating text input */}
                         {textTarget && (
-                          <div style={{ position: 'absolute', top: textTarget.y, left: textTarget.x, zIndex: 20 }}>
+                          <div style={{ position: 'absolute', top: textTarget.y, left: textTarget.x, zIndex: 1100 }}>
                             <input
                               ref={textInputRef}
                               value={textVal}
@@ -723,6 +838,27 @@ export default function Editor() {
                             />
                           </div>
                         )}
+
+                        {/* Crop confirm overlay */}
+                        {pendingCrop && tool === 'crop' && (
+                          <div style={{
+                            position: 'absolute',
+                            top: Math.min(pendingCrop.y + pendingCrop.h + 8, (canvasDims?.h ?? 0) - 44),
+                            left: Math.max(pendingCrop.x, 0),
+                            zIndex: 1100,
+                            display: 'flex', gap: 5,
+                            background: 'rgba(10,8,30,0.94)',
+                            border: '1px solid rgba(255,255,255,0.15)',
+                            borderRadius: 8, padding: '5px 8px',
+                          }}>
+                            <button onClick={applyCrop} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 10px', borderRadius: 5, border: '1px solid rgba(99,102,241,0.5)', background: 'rgba(99,102,241,0.2)', color: '#a5b4fc', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+                              <Crop size={10} /> Apply
+                            </button>
+                            <button onClick={() => setPendingCrop(null)} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 10px', borderRadius: 5, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.07)', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 11 }}>
+                              <X size={10} /> Cancel
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </Document>
                   )}
@@ -732,6 +868,95 @@ export default function Editor() {
           </motion.div>
         )}
       </AnimatePresence>
+    </div>
+  )
+}
+
+// ── Thumbnail panel (Pages tab) ──────────────────────────────────────────────
+
+function ThumbnailPanel({
+  pdfData, numPages, pageNumber, onPageClick,
+  selectedPages, onToggleSelect,
+  dragPage, onDragPage, dragOverPage, onDragOverPage, onReorder,
+  onExtract, onInsert,
+}: {
+  pdfData: string | null
+  numPages: number
+  pageNumber: number
+  onPageClick: (p: number) => void
+  selectedPages: Set<number>
+  onToggleSelect: (p: number) => void
+  dragPage: number | null
+  onDragPage: (p: number | null) => void
+  dragOverPage: number | null
+  onDragOverPage: (p: number | null) => void
+  onReorder: (from: number, to: number) => void
+  onExtract: () => void
+  onInsert: () => void
+}) {
+  if (!pdfData) return <div style={{ padding: 12, color: 'var(--text-muted)', fontSize: 12, textAlign: 'center' }}>No PDF open</div>
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <Document file={pdfData} loading={null} error={null}>
+          {Array.from({ length: numPages }, (_, i) => i + 1).map(p => {
+            const isCurrent = p === pageNumber
+            const isSelected = selectedPages.has(p)
+            const isDragOver = dragOverPage === p
+            return (
+              <div
+                key={p}
+                draggable
+                onDragStart={() => onDragPage(p)}
+                onDragOver={e => { e.preventDefault(); onDragOverPage(p) }}
+                onDrop={e => { e.preventDefault(); if (dragPage && dragPage !== p) onReorder(dragPage, p); onDragPage(null); onDragOverPage(null) }}
+                onDragEnd={() => { onDragPage(null); onDragOverPage(null) }}
+                onClick={e => { if (e.ctrlKey || e.metaKey) onToggleSelect(p); else onPageClick(p) }}
+                style={{
+                  cursor: 'grab',
+                  borderRadius: 6,
+                  border: isDragOver ? '2px dashed rgba(99,102,241,0.8)'
+                    : isCurrent ? '2px solid #6366f1'
+                    : isSelected ? '2px solid #22c55e'
+                    : '2px solid transparent',
+                  background: isSelected ? 'rgba(34,197,94,0.08)' : isCurrent ? 'rgba(99,102,241,0.1)' : 'transparent',
+                  padding: 3,
+                  position: 'relative',
+                  userSelect: 'none',
+                }}
+              >
+                <Page
+                  pageNumber={p}
+                  width={148}
+                  renderTextLayer={false}
+                  renderAnnotationLayer={false}
+                  loading={<div style={{ width: 148, height: 190, background: 'rgba(255,255,255,0.05)', borderRadius: 3 }} />}
+                />
+                <div style={{ position: 'absolute', bottom: 6, left: 0, right: 0, textAlign: 'center', fontSize: 10, color: isCurrent ? '#a5b4fc' : 'var(--text-muted)', fontWeight: isCurrent ? 700 : 400, pointerEvents: 'none' }}>
+                  {p}
+                </div>
+                {isSelected && (
+                  <div style={{ position: 'absolute', top: 6, right: 6, width: 14, height: 14, borderRadius: '50%', background: '#22c55e', display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
+                    <CheckSquare size={9} color="white" />
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </Document>
+      </div>
+
+      <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', padding: '8px 0 4px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {selectedPages.size > 0 && (
+          <button onClick={onExtract} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(34,197,94,0.4)', background: 'rgba(34,197,94,0.1)', color: '#4ade80', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+            <CheckSquare size={11} /> Extract {selectedPages.size} page{selectedPages.size !== 1 ? 's' : ''}
+          </button>
+        )}
+        <button onClick={onInsert} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(99,102,241,0.4)', background: 'rgba(99,102,241,0.1)', color: '#a5b4fc', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+          <FilePlus size={11} /> Insert PDF
+        </button>
+      </div>
     </div>
   )
 }

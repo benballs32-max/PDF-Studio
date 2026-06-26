@@ -5,12 +5,12 @@ Cross off items as they are completed.
 
 ---
 
-## Phase 1 — Page Management
-- [ ] Page thumbnails sidebar (click to jump to page)
-- [ ] Drag to reorder pages
-- [ ] Extract specific pages to a new PDF
-- [ ] Insert pages from another PDF
-- [ ] Crop pages
+## Phase 1 — Page Management ✅ DONE
+- [x] Page thumbnails sidebar (click to jump to page)
+- [x] Drag to reorder pages
+- [x] Extract specific pages to a new PDF
+- [x] Insert pages from another PDF
+- [x] Crop pages
 
 ## Phase 2 — Document Navigation
 - [ ] Bookmarks / outline panel (chapter tree from PDF metadata)

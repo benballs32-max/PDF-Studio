@@ -143,6 +143,37 @@ def apply_annotations(input: str, output: str, annotations: list, **_):
     doc.save(output)
     return {"success": True}
 
+def reorder_pages(input: str, output: str, order: list, **_):
+    import fitz
+    doc = fitz.open(input)
+    doc.select(order)
+    doc.save(output)
+    return {"success": True, "pages": len(doc)}
+
+def extract_pages(input: str, output: str, pages: list, **_):
+    import fitz
+    doc = fitz.open(input)
+    out = fitz.open()
+    for pg in sorted(set(pages)):
+        out.insert_pdf(doc, from_page=pg, to_page=pg)
+    out.save(output)
+    return {"success": True, "pages": len(out)}
+
+def insert_pages(input: str, output: str, source: str, position: int, **_):
+    import fitz
+    doc = fitz.open(input)
+    src = fitz.open(source)
+    doc.insert_pdf(src, start_at=position)
+    doc.save(output)
+    return {"success": True, "pages": len(doc)}
+
+def crop_page(input: str, output: str, page: int, rect: list, **_):
+    import fitz
+    doc = fitz.open(input)
+    doc[page].set_cropbox(fitz.Rect(rect))
+    doc.save(output)
+    return {"success": True}
+
 def encrypt_pdf(input: str, output: str, password: str, **_):
     import fitz
     doc = fitz.open(input)
@@ -175,6 +206,10 @@ COMMANDS = {
     "apply_annotations": apply_annotations,
     "encrypt_pdf": encrypt_pdf,
     "decrypt_pdf": decrypt_pdf,
+    "reorder_pages": reorder_pages,
+    "extract_pages": extract_pages,
+    "insert_pages": insert_pages,
+    "crop_page": crop_page,
 }
 
 if __name__ == "__main__":
