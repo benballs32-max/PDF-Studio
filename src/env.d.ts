@@ -10,6 +10,8 @@ interface Window {
     selectDir: () => Promise<string | undefined>
     showItem: (path: string) => Promise<void>
     readFile: (path: string) => Promise<string>
+    makeTempCopy: (src: string) => Promise<string>
+    deleteTempFile: (path: string) => Promise<void>
     pdfCommand: (cmd: string, args: object) => Promise<unknown>
   }
 }

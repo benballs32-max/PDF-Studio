@@ -108,6 +108,10 @@ export default function Editor() {
   const [dragOverPage, setDragOverPage] = useState<number | null>(null)
   const [pendingCrop, setPendingCrop] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
 
+  // Working copy — page ops write here; original never touched until Save
+  const [workingFile, setWorkingFile] = useState<string | null>(null)
+  const workingFileRef = useRef<string | null>(null)
+
   const viewerRef = useRef<HTMLDivElement>(null)
   const overlayRef = useRef<HTMLCanvasElement>(null)
   const pageContainerRef = useRef<HTMLDivElement>(null)
@@ -333,6 +337,7 @@ export default function Editor() {
   }
 
   const switchFile = (path: string) => {
+    cleanupWorkingFile()
     setActiveFile(path)
     setPageNumber(1)
     setAnnotations(new Map())
@@ -374,18 +379,51 @@ export default function Editor() {
   }
 
   // ── Page management ─────────────────────────────────────────────────────────
+
+  // Reload viewer from working copy (if any), else from original
   const reloadPdf = async () => {
-    if (!activeFile) return
-    const data = await window.electronAPI?.readFile(activeFile)
+    const path = workingFileRef.current ?? activeFile
+    if (!path) return
+    const data = await window.electronAPI?.readFile(path)
     if (data) setPdfData(data)
+  }
+
+  // Create a temp copy of the original on first page edit; return its path
+  const ensureWorkingCopy = async (): Promise<string | null> => {
+    if (workingFileRef.current) return workingFileRef.current
+    if (!activeFile) return null
+    const tmp = await window.electronAPI?.makeTempCopy(activeFile)
+    if (!tmp) return null
+    workingFileRef.current = tmp
+    setWorkingFile(tmp)
+    return tmp
+  }
+
+  // Delete temp file and reset working-copy state
+  const cleanupWorkingFile = () => {
+    const wf = workingFileRef.current
+    workingFileRef.current = null
+    setWorkingFile(null)
+    if (wf) window.electronAPI?.deleteTempFile(wf)
+  }
+
+  // Discard all page changes and reload the original
+  const discardChanges = async () => {
+    cleanupWorkingFile()
+    if (activeFile) {
+      const data = await window.electronAPI?.readFile(activeFile)
+      if (data) setPdfData(data)
+    }
   }
 
   const reorderPagesAction = async (fromPage: number, toPage: number) => {
     if (!activeFile || fromPage === toPage) return
+    const wf = await ensureWorkingCopy()
+    if (!wf) return
     const order = Array.from({ length: numPages }, (_, i) => i)
     order.splice(fromPage - 1, 1)
     order.splice(toPage - 1, 0, fromPage - 1)
-    await window.electronAPI?.pdfCommand('reorder_pages', { input: activeFile, output: activeFile, order })
+    await window.electronAPI?.pdfCommand('reorder_pages', { input: wf, output: wf, order })
     await reloadPdf()
     setDragPage(null); setDragOverPage(null)
   }
@@ -394,8 +432,9 @@ export default function Editor() {
     if (!activeFile || selectedPages.size === 0) return
     const out = await window.electronAPI?.savePath('pdf')
     if (!out) return
+    const src = workingFileRef.current ?? activeFile
     const pages = [...selectedPages].sort((a, b) => a - b).map(p => p - 1)
-    await window.electronAPI?.pdfCommand('extract_pages', { input: activeFile, output: out, pages })
+    await window.electronAPI?.pdfCommand('extract_pages', { input: src, output: out, pages })
     window.electronAPI?.showItem(out)
     setSelectedPages(new Set())
   }
@@ -404,21 +443,30 @@ export default function Editor() {
     if (!activeFile) return
     const paths = await window.electronAPI?.openPDF()
     if (!paths?.[0]) return
-    await window.electronAPI?.pdfCommand('insert_pages', {
-      input: activeFile, output: activeFile, source: paths[0], position: pageNumber,
-    })
-    await reloadPdf()
+    const wf = await ensureWorkingCopy()
+    if (!wf) return
+    try {
+      await window.electronAPI?.pdfCommand('insert_pages', {
+        input: wf, output: wf, source: paths[0], position: pageNumber,
+      })
+      await reloadPdf()
+    } catch (err) {
+      console.error('insert_pages failed:', err)
+      alert(`Insert failed: ${err instanceof Error ? err.message : String(err)}`)
+    }
   }
 
   const applyCrop = async () => {
-    if (!pendingCrop || !activeFile || !canvasDims) return
-    const ptH = canvasDims.h / scale
+    if (!pendingCrop || !activeFile) return
+    const wf = await ensureWorkingCopy()
+    if (!wf) return
+    // PyMuPDF uses top-left origin (Y down) — same as canvas, no Y-flip needed
     const x0 = pendingCrop.x / scale
-    const y0 = ptH - (pendingCrop.y + pendingCrop.h) / scale
+    const y0 = pendingCrop.y / scale
     const x1 = (pendingCrop.x + pendingCrop.w) / scale
-    const y1 = ptH - pendingCrop.y / scale
+    const y1 = (pendingCrop.y + pendingCrop.h) / scale
     await window.electronAPI?.pdfCommand('crop_page', {
-      input: activeFile, output: activeFile, page: pageNumber - 1, rect: [x0, y0, x1, y1],
+      input: wf, output: wf, page: pageNumber - 1, rect: [x0, y0, x1, y1],
     })
     setPendingCrop(null)
     await reloadPdf()
@@ -519,27 +567,29 @@ export default function Editor() {
   // ── Page actions via PyMuPDF ────────────────────────────────────────────────
   const rotatePage = async (dir: 'cw' | 'ccw') => {
     if (!activeFile) return
-    const outPath = activeFile // save in-place
+    const wf = await ensureWorkingCopy()
+    if (!wf) return
     await window.electronAPI?.pdfCommand('rotate_page', {
-      input: activeFile, output: outPath, page: pageNumber - 1, angle: dir === 'cw' ? 90 : -90,
+      input: wf, output: wf, page: pageNumber - 1, angle: dir === 'cw' ? 90 : -90,
     })
-    // Reload
-    const data = await window.electronAPI?.readFile(activeFile)
-    if (data) setPdfData(data)
+    await reloadPdf()
   }
 
   const deletePage = async () => {
     if (!activeFile || numPages <= 1) return
+    const wf = await ensureWorkingCopy()
+    if (!wf) return
     await window.electronAPI?.pdfCommand('delete_page', {
-      input: activeFile, output: activeFile, page: pageNumber - 1,
+      input: wf, output: wf, page: pageNumber - 1,
     })
-    const data = await window.electronAPI?.readFile(activeFile)
-    if (data) { setPdfData(data); goTo(Math.min(pageNumber, numPages - 1)) }
+    await reloadPdf()
+    goTo(Math.min(pageNumber, numPages - 1))
   }
 
   // ── Save with annotations ───────────────────────────────────────────────────
   const save = async () => {
-    if (!activeFile || !canvasDims) return
+    const sourceFile = workingFileRef.current ?? activeFile
+    if (!sourceFile || !canvasDims) return
     setSaveStatus('saving')
     const annotList: object[] = []
 
@@ -563,7 +613,7 @@ export default function Editor() {
       const outPath = await window.electronAPI?.savePath('pdf')
       if (!outPath) { setSaveStatus('idle'); return }
       await window.electronAPI?.pdfCommand('apply_annotations', {
-        input: activeFile, output: outPath, annotations: annotList,
+        input: sourceFile, output: outPath, annotations: annotList,
       })
       setSaveStatus('done')
       setTimeout(() => setSaveStatus('idle'), 2500)
@@ -594,20 +644,32 @@ export default function Editor() {
         </span>
         <ToolBarBtn onClick={openFromDialog} accent><Upload size={13} /> Open</ToolBarBtn>
         {activeFile && (
-          <motion.button
-            whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }}
-            onClick={save}
-            disabled={saveStatus === 'saving'}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px',
-              borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 600,
-              background: saveStatus === 'done' ? 'rgba(34,197,94,0.25)' : saveStatus === 'error' ? 'rgba(239,68,68,0.2)' : 'linear-gradient(135deg,#6366f1,#8b5cf6)',
-              color: 'white', boxShadow: '0 0 20px rgba(99,102,241,0.3)',
-            }}
-          >
-            <Save size={13} />
-            {saveStatus === 'saving' ? 'Saving…' : saveStatus === 'done' ? 'Saved!' : saveStatus === 'error' ? 'Error' : 'Save PDF'}
-          </motion.button>
+          <>
+            {workingFile && (
+              <span style={{ fontSize: 11, color: '#fbbf24', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+                ● Unsaved page changes
+              </span>
+            )}
+            {workingFile && (
+              <ToolBarBtn onClick={discardChanges}>
+                <X size={12} /> Discard
+              </ToolBarBtn>
+            )}
+            <motion.button
+              whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }}
+              onClick={save}
+              disabled={saveStatus === 'saving'}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px',
+                borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                background: saveStatus === 'done' ? 'rgba(34,197,94,0.25)' : saveStatus === 'error' ? 'rgba(239,68,68,0.2)' : 'linear-gradient(135deg,#6366f1,#8b5cf6)',
+                color: 'white', boxShadow: '0 0 20px rgba(99,102,241,0.3)',
+              }}
+            >
+              <Save size={13} />
+              {saveStatus === 'saving' ? 'Saving…' : saveStatus === 'done' ? 'Saved!' : saveStatus === 'error' ? 'Error' : 'Save PDF'}
+            </motion.button>
+          </>
         )}
       </div>
 

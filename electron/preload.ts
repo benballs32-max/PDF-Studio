@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Read a local file as binary (avoids file:// URL restrictions)
   readFile: (path: string) => ipcRenderer.invoke('fs:readFile', path),
+  makeTempCopy: (src: string) => ipcRenderer.invoke('fs:makeTempCopy', src),
+  deleteTempFile: (path: string) => ipcRenderer.invoke('fs:deleteTempFile', path),
 
   // PDF processing
   pdfCommand: (cmd: string, args: object) =>

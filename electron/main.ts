@@ -1,7 +1,8 @@
 import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron'
-import { join } from 'path'
+import { join, basename } from 'path'
 import { spawn } from 'child_process'
-import { readFile } from 'fs/promises'
+import { readFile, copyFile, unlink } from 'fs/promises'
+import { tmpdir } from 'os'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -102,6 +103,17 @@ ipcMain.handle('dialog:selectDir', async () => {
     properties: ['openDirectory', 'createDirectory'],
   })
   return result.filePaths[0]
+})
+
+// IPC: temp working copy for non-destructive page edits
+ipcMain.handle('fs:makeTempCopy', async (_, src: string) => {
+  const tmp = join(tmpdir(), `pdf-studio-${Date.now()}-${basename(src)}`)
+  await copyFile(src, tmp)
+  return tmp
+})
+
+ipcMain.handle('fs:deleteTempFile', async (_, path: string) => {
+  try { await unlink(path) } catch { /* already gone */ }
 })
 
 // IPC: open output file in explorer

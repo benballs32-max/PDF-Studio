@@ -2,6 +2,24 @@
 import sys
 import json
 import os
+import tempfile
+
+def _save(doc, src: str, dst: str):
+    """Save fitz doc to dst. When dst == src (in-place), writes to a temp file
+    then atomically replaces the original (required by PyMuPDF)."""
+    if os.path.normcase(os.path.abspath(src)) == os.path.normcase(os.path.abspath(dst)):
+        fd, tmp = tempfile.mkstemp(suffix='.pdf', dir=os.path.dirname(os.path.abspath(dst)))
+        try:
+            os.close(fd)
+            doc.save(tmp)
+            doc.close()
+            os.replace(tmp, dst)
+        except Exception:
+            try: os.unlink(tmp)
+            except OSError: pass
+            raise
+    else:
+        doc.save(dst)
 
 def to_text(input: str, output: str, **_):
     import fitz
@@ -107,15 +125,16 @@ def rotate_page(input: str, output: str, page: int, angle: int, **_):
     import fitz
     doc = fitz.open(input)
     doc[page].set_rotation((doc[page].rotation + angle) % 360)
-    doc.save(output)
+    _save(doc, input, output)
     return {"success": True}
 
 def delete_page(input: str, output: str, page: int, **_):
     import fitz
     doc = fitz.open(input)
     doc.delete_page(page)
-    doc.save(output)
-    return {"success": True, "pages": len(doc)}
+    count = len(doc)
+    _save(doc, input, output)
+    return {"success": True, "pages": count}
 
 def apply_annotations(input: str, output: str, annotations: list, **_):
     import fitz
@@ -147,8 +166,9 @@ def reorder_pages(input: str, output: str, order: list, **_):
     import fitz
     doc = fitz.open(input)
     doc.select(order)
-    doc.save(output)
-    return {"success": True, "pages": len(doc)}
+    count = len(doc)
+    _save(doc, input, output)
+    return {"success": True, "pages": count}
 
 def extract_pages(input: str, output: str, pages: list, **_):
     import fitz
@@ -164,14 +184,16 @@ def insert_pages(input: str, output: str, source: str, position: int, **_):
     doc = fitz.open(input)
     src = fitz.open(source)
     doc.insert_pdf(src, start_at=position)
-    doc.save(output)
-    return {"success": True, "pages": len(doc)}
+    src.close()
+    count = len(doc)
+    _save(doc, input, output)
+    return {"success": True, "pages": count}
 
 def crop_page(input: str, output: str, page: int, rect: list, **_):
     import fitz
     doc = fitz.open(input)
     doc[page].set_cropbox(fitz.Rect(rect))
-    doc.save(output)
+    _save(doc, input, output)
     return {"success": True}
 
 def encrypt_pdf(input: str, output: str, password: str, **_):
