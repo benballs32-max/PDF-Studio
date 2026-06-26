@@ -4,14 +4,15 @@ import json
 import os
 import tempfile
 
-def _save(doc, src: str, dst: str):
+def _save(doc, src: str, dst: str, **save_kwargs):
     """Save fitz doc to dst. When dst == src (in-place), writes to a temp file
-    then atomically replaces the original (required by PyMuPDF)."""
+    then atomically replaces the original (required by PyMuPDF).
+    Extra kwargs (e.g. encryption, permissions) are forwarded to doc.save()."""
     if os.path.normcase(os.path.abspath(src)) == os.path.normcase(os.path.abspath(dst)):
         fd, tmp = tempfile.mkstemp(suffix='.pdf', dir=os.path.dirname(os.path.abspath(dst)))
         try:
             os.close(fd)
-            doc.save(tmp)
+            doc.save(tmp, **save_kwargs)
             doc.close()
             os.replace(tmp, dst)
         except Exception:
@@ -19,7 +20,7 @@ def _save(doc, src: str, dst: str):
             except OSError: pass
             raise
     else:
-        doc.save(dst)
+        doc.save(dst, **save_kwargs)
 
 def to_text(input: str, output: str, **_):
     import fitz
@@ -370,6 +371,39 @@ def get_outline(input: str, **_):
     toc = doc.get_toc()  # [[level, title, page_1based], ...]
     return {"success": True, "outline": [{"level": t[0], "title": t[1], "page": t[2]} for t in toc]}
 
+def redact_areas(input: str, output: str, page: int, rects: list, **_):
+    """Permanently black out the given rectangles on a page (irreversible)."""
+    import fitz
+    doc = fitz.open(input)
+    pg = doc[page]
+    for r in rects:
+        pg.add_redact_annot(fitz.Rect(r['x0'], r['y0'], r['x1'], r['y1']), fill=(0, 0, 0))
+    pg.apply_redactions()
+    _save(doc, input, output)
+    return {"success": True}
+
+def set_permissions(input: str, output: str,
+                    allow_print: bool = True, allow_copy: bool = True,
+                    allow_modify: bool = True, allow_annotate: bool = True,
+                    allow_forms: bool = True, user_password: str = '', **_):
+    """Encrypt with AES-256 and enforce permission flags. Owner password is
+    randomly generated so restrictions cannot be removed without the owner key."""
+    import fitz, secrets
+    perms = fitz.PDF_PERM_ACCESSIBILITY  # always grant accessibility
+    if allow_print:    perms |= fitz.PDF_PERM_PRINT | fitz.PDF_PERM_PRINT_HQ
+    if allow_copy:     perms |= fitz.PDF_PERM_COPY
+    if allow_modify:   perms |= fitz.PDF_PERM_MODIFY | fitz.PDF_PERM_ASSEMBLE
+    if allow_annotate: perms |= fitz.PDF_PERM_ANNOTATE
+    if allow_forms:    perms |= fitz.PDF_PERM_FORM
+    owner_pw = secrets.token_hex(16)
+    doc = fitz.open(input)
+    _save(doc, input, output,
+          encryption=fitz.PDF_ENCRYPT_AES_256,
+          owner_pw=owner_pw,
+          user_pw=user_password,
+          permissions=perms)
+    return {"success": True}
+
 def encrypt_pdf(input: str, output: str, password: str, **_):
     import fitz
     doc = fitz.open(input)
@@ -408,6 +442,8 @@ COMMANDS = {
     "add_header_footer": add_header_footer,
     "add_page_numbers": add_page_numbers,
     "get_outline": get_outline,
+    "redact_areas": redact_areas,
+    "set_permissions": set_permissions,
     "encrypt_pdf": encrypt_pdf,
     "decrypt_pdf": decrypt_pdf,
     "reorder_pages": reorder_pages,

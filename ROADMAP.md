@@ -30,10 +30,10 @@ Cross off items as they are completed.
 - [x] Word / PowerPoint / Excel → PDF
 - [x] Webpage (URL) → PDF
 
-## Phase 5 — Security & Compliance
-- [ ] Redaction — permanently black out sensitive text & images
-- [ ] Permission controls (restrict printing / copying / editing independently)
-- [ ] Digital signatures (sign + verify)
+## Phase 5 — Security & Compliance ✅ DONE (practical subset)
+- [x] Redaction — permanently black out sensitive text & images
+- [x] Permission controls (restrict printing / copying / editing independently)
+- [ ] Digital signatures — skipped for now (see Future section)
 
 ## Phase 6 — Forms
 - [ ] Fill existing PDF form fields
@@ -54,6 +54,10 @@ Cross off items as they are completed.
 ---
 
 ## Future / Deferred
+
+### Digital Signatures
+- [ ] **Sign PDF** — apply a visible or invisible digital signature using a user-supplied `.pfx`/`.p12` certificate file (via `pyhanko` library). UI: pick cert, enter password, choose placement on page.
+- [ ] **Verify signatures** — read and display existing signature validity, signer info, and whether the document was modified after signing (PyMuPDF can read signature fields; pyhanko for full verification).
 
 ### PDF Content Editing (requires careful UX design)
 - [ ] **Image replacement** — detect images on the current page (via PyMuPDF `get_images` + `get_image_bbox`), highlight their bounding boxes in the viewer, click one to open a file picker and swap it via `doc.replace_image(xref, filename=...)`. Fully feasible.

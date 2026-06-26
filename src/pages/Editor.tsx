@@ -8,14 +8,14 @@ import {
   ZoomIn, ZoomOut, Maximize2, X, Save, RotateCw, Trash2,
   MousePointer, Highlighter, PenLine, Type, Eraser,
   Search, ChevronUp, ChevronDown, Crop, LayoutGrid, FilePlus, CheckSquare,
-  BookOpen, MessageSquare, Layers,
+  BookOpen, MessageSquare, Layers, EyeOff, Lock,
 } from 'lucide-react'
 import 'react-pdf/dist/Page/AnnotationLayer.css'
 import 'react-pdf/dist/Page/TextLayer.css'
 
 pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs'
 
-type Tool = 'select' | 'highlight' | 'draw' | 'text' | 'erase' | 'crop'
+type Tool = 'select' | 'highlight' | 'draw' | 'text' | 'erase' | 'crop' | 'redact'
 type AnnotShape =
   | { type: 'highlight'; x: number; y: number; w: number; h: number; color: string }
   | { type: 'draw'; pts: [number, number][]; color: string; lw: number }
@@ -115,6 +115,10 @@ export default function Editor() {
 
   // Content Tools modal
   const [showContentTools, setShowContentTools] = useState(false)
+  // Permissions modal
+  const [showPermissions, setShowPermissions] = useState(false)
+  // Pending redaction rectangles (canvas coords, per page)
+  const [pendingRedacts, setPendingRedacts] = useState<{ page: number; x: number; y: number; w: number; h: number }[]>([])
 
   const viewerRef = useRef<HTMLDivElement>(null)
   const overlayRef = useRef<HTMLCanvasElement>(null)
@@ -283,6 +287,28 @@ export default function Editor() {
       ctx.strokeRect(pendingCrop.x, pendingCrop.y, pendingCrop.w, pendingCrop.h)
       ctx.setLineDash([])
     }
+    // Committed redaction boxes for this page (solid black, permanent-looking)
+    const pageRedacts = pendingRedacts.filter(r => r.page === pageNumber)
+    for (const r of pageRedacts) {
+      ctx.fillStyle = '#000'
+      ctx.fillRect(r.x, r.y, r.w, r.h)
+      const fs = Math.max(8, Math.min(12, r.h * 0.35))
+      ctx.fillStyle = 'rgba(255,255,255,0.45)'
+      ctx.font = `700 ${fs}px Inter, sans-serif`
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+      ctx.fillText('REDACTED', r.x + r.w / 2, r.y + r.h / 2)
+      ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'
+    }
+    // Live redact drag preview
+    if (dragRect && tool === 'redact') {
+      ctx.fillStyle = 'rgba(0,0,0,0.45)'
+      ctx.fillRect(dragRect.x, dragRect.y, dragRect.w, dragRect.h)
+      ctx.strokeStyle = '#ef4444'
+      ctx.lineWidth = 2
+      ctx.setLineDash([5, 3])
+      ctx.strokeRect(dragRect.x, dragRect.y, dragRect.w, dragRect.h)
+      ctx.setLineDash([])
+    }
     if (currentPath.length > 1 && tool === 'draw') {
       ctx.strokeStyle = color
       ctx.lineWidth = lineWidth
@@ -293,7 +319,7 @@ export default function Editor() {
       ctx.stroke()
     }
     ctx.restore()
-  }, [annotations, pageNumber, canvasDims, dragRect, currentPath, tool, color, lineWidth, allMatches, matchIdx, scale, pendingCrop])
+  }, [annotations, pageNumber, canvasDims, dragRect, currentPath, tool, color, lineWidth, allMatches, matchIdx, scale, pendingCrop, pendingRedacts])
 
   // Focus text input when it appears
   useEffect(() => {
@@ -485,6 +511,34 @@ export default function Editor() {
     await reloadPdf()
   }
 
+  const applyRedactions = async () => {
+    if (!pendingRedacts.length || !activeFile) return
+    const wf = await ensureWorkingCopy()
+    if (!wf) return
+    const byPage = new Map<number, { x0: number; y0: number; x1: number; y1: number }[]>()
+    for (const r of pendingRedacts) {
+      const p = r.page - 1
+      if (!byPage.has(p)) byPage.set(p, [])
+      byPage.get(p)!.push({ x0: r.x / scale, y0: r.y / scale, x1: (r.x + r.w) / scale, y1: (r.y + r.h) / scale })
+    }
+    for (const [page, rects] of byPage.entries()) {
+      await window.electronAPI?.pdfCommand('redact_areas', { input: wf, output: wf, page, rects })
+    }
+    setPendingRedacts([])
+    setTool('select')
+    await reloadPdf()
+  }
+
+  const applyPermissions = async (args: object) => {
+    const src = workingFileRef.current ?? activeFile
+    if (!src) return
+    const out = await window.electronAPI?.savePath('pdf')
+    if (!out) return
+    await window.electronAPI?.pdfCommand('set_permissions', { input: src, output: out, ...args })
+    window.electronAPI?.showItem(out)
+    setShowPermissions(false)
+  }
+
   const togglePageSelect = (p: number) => {
     setSelectedPages(prev => {
       const next = new Set(prev)
@@ -536,12 +590,13 @@ export default function Editor() {
     if (tool === 'highlight') { setDragRect({ x, y, w: 0, h: 0 }); setDrawing(true); return }
     if (tool === 'draw') { setCurrentPath([[x, y]]); setDrawing(true); return }
     if (tool === 'crop') { setPendingCrop(null); setDragRect({ x, y, w: 0, h: 0 }); setDrawing(true); return }
+    if (tool === 'redact') { setDragRect({ x, y, w: 0, h: 0 }); setDrawing(true); return }
   }
 
   const onMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!drawing) return
     const [x, y] = relPos(e)
-    if ((tool === 'highlight' || tool === 'crop') && dragRect) {
+    if ((tool === 'highlight' || tool === 'crop' || tool === 'redact') && dragRect) {
       setDragRect({ x: dragRect.x, y: dragRect.y, w: x - dragRect.x, h: y - dragRect.y })
     }
     if (tool === 'draw') {
@@ -565,6 +620,11 @@ export default function Editor() {
       const x = dragRect.w < 0 ? dragRect.x + dragRect.w : dragRect.x
       const y = dragRect.h < 0 ? dragRect.y + dragRect.h : dragRect.y
       setPendingCrop({ x, y, w: Math.abs(dragRect.w), h: Math.abs(dragRect.h) })
+    }
+    if (tool === 'redact' && dragRect && Math.abs(dragRect.w) > 10 && Math.abs(dragRect.h) > 10) {
+      const x = dragRect.w < 0 ? dragRect.x + dragRect.w : dragRect.x
+      const y = dragRect.h < 0 ? dragRect.y + dragRect.h : dragRect.y
+      setPendingRedacts(prev => [...prev, { page: pageNumber, x, y, w: Math.abs(dragRect.w), h: Math.abs(dragRect.h) }])
     }
     setDragRect(null)
     setCurrentPath([])
@@ -637,7 +697,7 @@ export default function Editor() {
   }
 
   const cursorFor: Record<Tool, string> = {
-    select: 'default', highlight: 'crosshair', draw: 'crosshair', text: 'text', erase: 'cell', crop: 'crosshair',
+    select: 'default', highlight: 'crosshair', draw: 'crosshair', text: 'text', erase: 'cell', crop: 'crosshair', redact: 'crosshair',
   }
 
   const pageAnnotCount = (annotations.get(pageNumber) ?? []).length
@@ -690,6 +750,13 @@ export default function Editor() {
       <AnimatePresence>
         {showContentTools && activeFile && (
           <ContentToolsModal onClose={() => setShowContentTools(false)} onApply={runContentOp} />
+        )}
+      </AnimatePresence>
+
+      {/* Permissions modal */}
+      <AnimatePresence>
+        {showPermissions && activeFile && (
+          <PermissionsModal onClose={() => setShowPermissions(false)} onApply={applyPermissions} />
         )}
       </AnimatePresence>
 
@@ -849,6 +916,16 @@ export default function Editor() {
                   <Layers size={13} />
                 </TBtn>
 
+                {/* Redact */}
+                <TBtn onClick={() => setTool('redact')} active={tool === 'redact'} title="Redact — permanently hide content">
+                  <EyeOff size={13} />
+                </TBtn>
+
+                {/* Permissions */}
+                <TBtn onClick={() => setShowPermissions(o => !o)} active={showPermissions} title="PDF Permissions & Password">
+                  <Lock size={13} />
+                </TBtn>
+
                 {pageAnnotCount > 0 && (
                   <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)' }}>{pageAnnotCount} annotation{pageAnnotCount !== 1 ? 's' : ''}</span>
                 )}
@@ -944,6 +1021,23 @@ export default function Editor() {
                               placeholder="Type here…"
                               style={{ background: 'rgba(255,255,200,0.95)', border: '1.5px solid #FACC15', borderRadius: 4, padding: '2px 6px', fontSize: 14, color: '#000', minWidth: 100, outline: 'none' }}
                             />
+                          </div>
+                        )}
+
+                        {/* Redact confirm overlay — shows whenever there are pending redacts */}
+                        {pendingRedacts.length > 0 && (
+                          <div style={{
+                            position: 'absolute', bottom: 14, left: '50%', transform: 'translateX(-50%)',
+                            zIndex: 1100, display: 'flex', gap: 5,
+                            background: 'rgba(10,8,30,0.94)', border: '1px solid rgba(239,68,68,0.35)',
+                            borderRadius: 8, padding: '5px 8px', whiteSpace: 'nowrap',
+                          }}>
+                            <button onClick={applyRedactions} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 10px', borderRadius: 5, border: '1px solid rgba(239,68,68,0.5)', background: 'rgba(239,68,68,0.18)', color: '#fca5a5', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+                              <EyeOff size={10} /> Apply {pendingRedacts.length} Redaction{pendingRedacts.length !== 1 ? 's' : ''}
+                            </button>
+                            <button onClick={() => setPendingRedacts([])} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 10px', borderRadius: 5, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.06)', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 11 }}>
+                              <X size={10} /> Clear
+                            </button>
                           </div>
                         )}
 
@@ -1148,6 +1242,91 @@ function CtInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
 
 function CtSelect(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
   return <select {...props} style={{ background: 'rgba(30,25,60,0.95)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 7, padding: '7px 10px', color: 'var(--text-primary)', fontSize: 13, outline: 'none', width: '100%', ...props.style }} />
+}
+
+// ── Permissions modal ─────────────────────────────────────────────────────────
+
+function PermissionsModal({ onClose, onApply }: {
+  onClose: () => void
+  onApply: (args: object) => Promise<void>
+}) {
+  const [allowPrint,    setAllowPrint]    = useState(true)
+  const [allowCopy,     setAllowCopy]     = useState(true)
+  const [allowModify,   setAllowModify]   = useState(true)
+  const [allowAnnotate, setAllowAnnotate] = useState(true)
+  const [allowForms,    setAllowForms]    = useState(true)
+  const [userPw,        setUserPw]        = useState('')
+  const [busy,          setBusy]          = useState(false)
+
+  const allUnrestricted = allowPrint && allowCopy && allowModify && allowAnnotate && allowForms && !userPw
+
+  const apply = async () => {
+    setBusy(true)
+    try {
+      await onApply({ allow_print: allowPrint, allow_copy: allowCopy, allow_modify: allowModify, allow_annotate: allowAnnotate, allow_forms: allowForms, user_password: userPw })
+    } catch (err) {
+      alert(`Permissions failed: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const checkboxes: [string, boolean, React.Dispatch<React.SetStateAction<boolean>>][] = [
+    ['Print',           allowPrint,    setAllowPrint],
+    ['Copy text',       allowCopy,     setAllowCopy],
+    ['Edit / modify',   allowModify,   setAllowModify],
+    ['Add annotations', allowAnnotate, setAllowAnnotate],
+    ['Fill form fields',allowForms,    setAllowForms],
+  ]
+
+  return (
+    <>
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        onClick={onClose}
+        style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 2000 }} />
+      <div style={{ position: 'fixed', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2001, pointerEvents: 'none' }}>
+        <motion.div
+          initial={{ opacity: 0, scale: 0.94 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.94 }}
+          transition={{ duration: 0.14 }}
+          style={{ width: 360, pointerEvents: 'all', background: 'rgba(10,8,32,0.97)', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 16, overflow: 'hidden', boxShadow: '0 28px 64px rgba(0,0,0,0.55)' }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 16px', borderBottom: '1px solid rgba(255,255,255,0.09)' }}>
+            <Lock size={14} color="#a5b4fc" />
+            <span style={{ fontWeight: 700, fontSize: 14, flex: 1 }}>PDF Permissions</span>
+            <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 2, display: 'flex' }}><X size={14} /></button>
+          </div>
+
+          <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <CtField label="Password to open (leave blank = no password)">
+              <CtInput type="password" value={userPw} onChange={e => setUserPw(e.target.value)} placeholder="Optional open password…" />
+            </CtField>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Allow readers to…</span>
+              {checkboxes.map(([label, val, setter]) => (
+                <label key={label} style={{ display: 'flex', alignItems: 'center', gap: 9, cursor: 'pointer', fontSize: 13, color: 'var(--text-secondary)' }}>
+                  <input type="checkbox" checked={val} onChange={e => setter(e.target.checked)} style={{ accentColor: '#6366f1', width: 14, height: 14, cursor: 'pointer' }} />
+                  {label}
+                </label>
+              ))}
+            </div>
+
+            {!allUnrestricted && (
+              <div style={{ fontSize: 11, color: '#fbbf24', lineHeight: 1.55, padding: '8px 10px', borderRadius: 7, background: 'rgba(251,191,36,0.07)', border: '1px solid rgba(251,191,36,0.2)' }}>
+                Restrictions use AES-256 encryption. A random owner password is applied — only you can remove restrictions.
+              </div>
+            )}
+          </div>
+
+          <div style={{ padding: '0 16px 16px' }}>
+            <button onClick={apply} disabled={busy || allUnrestricted} style={{ width: '100%', padding: 10, borderRadius: 10, border: 'none', background: (busy || allUnrestricted) ? 'rgba(99,102,241,0.18)' : 'linear-gradient(135deg,#6366f1,#8b5cf6)', color: (busy || allUnrestricted) ? 'var(--text-muted)' : 'white', fontSize: 13, fontWeight: 700, cursor: (busy || allUnrestricted) ? 'default' : 'pointer' }}>
+              {busy ? 'Saving…' : allUnrestricted ? 'Restrict at least one permission or set a password' : 'Save Protected PDF'}
+            </button>
+          </div>
+        </motion.div>
+      </div>
+    </>
+  )
 }
 
 // ── Outline panel (Bookmarks tab) ────────────────────────────────────────────
