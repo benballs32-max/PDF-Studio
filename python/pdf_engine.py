@@ -371,6 +371,97 @@ def get_outline(input: str, **_):
     toc = doc.get_toc()  # [[level, title, page_1based], ...]
     return {"success": True, "outline": [{"level": t[0], "title": t[1], "page": t[2]} for t in toc]}
 
+def get_form_fields(input: str, **_):
+    import fitz
+    doc = fitz.open(input)
+    fields = []
+    for page_num, page in enumerate(doc):
+        for widget in page.widgets():
+            fields.append({
+                'name': widget.field_name,
+                'type': widget.field_type_string,
+                'value': str(widget.field_value or ''),
+                'page': page_num,
+                'rect': list(widget.rect),
+                'choices': list(widget.choice_values or []),
+            })
+    return {"success": True, "fields": fields}
+
+def fill_form_fields(input: str, output: str, fields: dict, **_):
+    import fitz
+    doc = fitz.open(input)
+    for page in doc:
+        for widget in page.widgets():
+            if widget.field_name in fields:
+                widget.field_value = fields[widget.field_name]
+                widget.update()
+    _save(doc, input, output)
+    return {"success": True}
+
+def add_form_field(input: str, output: str, page: int, field_type: str,
+                   name: str, rect: list, value: str = '', choices: list = None, **_):
+    import fitz
+    type_map = {
+        'text':     fitz.PDF_WIDGET_TYPE_TEXT,
+        'checkbox': fitz.PDF_WIDGET_TYPE_CHECKBOX,
+        'radio':    fitz.PDF_WIDGET_TYPE_RADIOBUTTON,
+        'dropdown': fitz.PDF_WIDGET_TYPE_COMBOBOX,
+        'listbox':  fitz.PDF_WIDGET_TYPE_LISTBOX,
+    }
+    doc = fitz.open(input)
+    pg = doc[page]
+    widget = fitz.Widget()
+    widget.field_type = type_map.get(field_type, fitz.PDF_WIDGET_TYPE_TEXT)
+    widget.field_name = name
+    widget.rect = fitz.Rect(rect)
+    if value:
+        widget.field_value = value
+    if choices:
+        widget.choice_values = choices
+    pg.add_widget(widget)
+    _save(doc, input, output)
+    return {"success": True}
+
+def export_form_data(input: str, output: str, format: str = 'json', **_):
+    import fitz, json
+    doc = fitz.open(input)
+    data = {}
+    for page in doc:
+        for widget in page.widgets():
+            data[widget.field_name] = str(widget.field_value or '')
+    if format == 'csv':
+        import csv
+        with open(output, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(['Field Name', 'Value'])
+            for k, v in data.items():
+                writer.writerow([k, v])
+    else:
+        with open(output, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2)
+    return {"success": True, "field_count": len(data)}
+
+def import_form_data(input: str, output: str, source: str, **_):
+    import fitz, json, os
+    ext = os.path.splitext(source)[1].lower()
+    if ext == '.csv':
+        import csv
+        data = {}
+        with open(source, encoding='utf-8') as f:
+            for row in csv.DictReader(f):
+                data[row['Field Name']] = row['Value']
+    else:
+        with open(source, encoding='utf-8') as f:
+            data = json.load(f)
+    doc = fitz.open(input)
+    for page in doc:
+        for widget in page.widgets():
+            if widget.field_name in data:
+                widget.field_value = data[widget.field_name]
+                widget.update()
+    _save(doc, input, output)
+    return {"success": True}
+
 def redact_areas(input: str, output: str, page: int, rects: list, **_):
     """Permanently black out the given rectangles on a page (irreversible)."""
     import fitz
@@ -442,6 +533,11 @@ COMMANDS = {
     "add_header_footer": add_header_footer,
     "add_page_numbers": add_page_numbers,
     "get_outline": get_outline,
+    "get_form_fields": get_form_fields,
+    "fill_form_fields": fill_form_fields,
+    "add_form_field": add_form_field,
+    "export_form_data": export_form_data,
+    "import_form_data": import_form_data,
     "redact_areas": redact_areas,
     "set_permissions": set_permissions,
     "encrypt_pdf": encrypt_pdf,

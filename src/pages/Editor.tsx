@@ -9,13 +9,14 @@ import {
   MousePointer, Highlighter, PenLine, Type, Eraser,
   Search, ChevronUp, ChevronDown, Crop, LayoutGrid, FilePlus, CheckSquare,
   BookOpen, MessageSquare, Layers, EyeOff, Lock,
+  ClipboardList, Circle,
 } from 'lucide-react'
 import 'react-pdf/dist/Page/AnnotationLayer.css'
 import 'react-pdf/dist/Page/TextLayer.css'
 
 pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs'
 
-type Tool = 'select' | 'highlight' | 'draw' | 'text' | 'erase' | 'crop' | 'redact'
+type Tool = 'select' | 'highlight' | 'draw' | 'text' | 'erase' | 'crop' | 'redact' | 'formfield'
 type AnnotShape =
   | { type: 'highlight'; x: number; y: number; w: number; h: number; color: string }
   | { type: 'draw'; pts: [number, number][]; color: string; lw: number }
@@ -103,7 +104,7 @@ export default function Editor() {
   const [matchIdx, setMatchIdx] = useState(0)
 
   // Page management
-  const [leftTab, setLeftTab] = useState<'files' | 'pages' | 'outline' | 'comments'>('files')
+  const [leftTab, setLeftTab] = useState<'files' | 'pages' | 'outline' | 'comments' | 'forms'>('files')
   const [selectedPages, setSelectedPages] = useState<Set<number>>(new Set())
   const [dragPage, setDragPage] = useState<number | null>(null)
   const [dragOverPage, setDragOverPage] = useState<number | null>(null)
@@ -119,6 +120,11 @@ export default function Editor() {
   const [showPermissions, setShowPermissions] = useState(false)
   // Pending redaction rectangles (canvas coords, per page)
   const [pendingRedacts, setPendingRedacts] = useState<{ page: number; x: number; y: number; w: number; h: number }[]>([])
+  // Form field creation
+  const [formFieldType, setFormFieldType] = useState<'text' | 'checkbox' | 'dropdown' | 'radio'>('text')
+  const [pendingFormField, setPendingFormField] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
+  const [formFieldConfig, setFormFieldConfig] = useState({ name: '', choices: '', value: '' })
+  const [formsReloadKey, setFormsReloadKey] = useState(0)
 
   const viewerRef = useRef<HTMLDivElement>(null)
   const overlayRef = useRef<HTMLCanvasElement>(null)
@@ -309,6 +315,21 @@ export default function Editor() {
       ctx.strokeRect(dragRect.x, dragRect.y, dragRect.w, dragRect.h)
       ctx.setLineDash([])
     }
+    // Form field placement preview
+    if (dragRect && tool === 'formfield') {
+      ctx.strokeStyle = '#3b82f6'
+      ctx.lineWidth = 2
+      ctx.setLineDash([5, 3])
+      ctx.strokeRect(dragRect.x, dragRect.y, dragRect.w, dragRect.h)
+      ctx.fillStyle = 'rgba(59,130,246,0.08)'
+      ctx.fillRect(dragRect.x, dragRect.y, dragRect.w, dragRect.h)
+      ctx.setLineDash([])
+    }
+    if (pendingFormField && tool === 'formfield') {
+      ctx.strokeStyle = '#3b82f6'
+      ctx.lineWidth = 2
+      ctx.strokeRect(pendingFormField.x, pendingFormField.y, pendingFormField.w, pendingFormField.h)
+    }
     if (currentPath.length > 1 && tool === 'draw') {
       ctx.strokeStyle = color
       ctx.lineWidth = lineWidth
@@ -319,7 +340,7 @@ export default function Editor() {
       ctx.stroke()
     }
     ctx.restore()
-  }, [annotations, pageNumber, canvasDims, dragRect, currentPath, tool, color, lineWidth, allMatches, matchIdx, scale, pendingCrop, pendingRedacts])
+  }, [annotations, pageNumber, canvasDims, dragRect, currentPath, tool, color, lineWidth, allMatches, matchIdx, scale, pendingCrop, pendingRedacts, pendingFormField, formFieldType])
 
   // Focus text input when it appears
   useEffect(() => {
@@ -539,6 +560,50 @@ export default function Editor() {
     setShowPermissions(false)
   }
 
+  const applyFormFields = async (fields: Record<string, string>) => {
+    const wf = await ensureWorkingCopy()
+    if (!wf) return
+    await window.electronAPI?.pdfCommand('fill_form_fields', { input: wf, output: wf, fields })
+    setFormsReloadKey(k => k + 1)
+    await reloadPdf()
+  }
+
+  const exportFormData = async (format: 'json' | 'csv') => {
+    const src = workingFileRef.current ?? activeFile
+    if (!src) return
+    const out = await window.electronAPI?.savePath(format)
+    if (!out) return
+    await window.electronAPI?.pdfCommand('export_form_data', { input: src, output: out, format })
+    window.electronAPI?.showItem(out)
+  }
+
+  const importFormData = async () => {
+    const paths = await window.electronAPI?.openFiles([{ name: 'Form Data', extensions: ['json', 'csv'] }], false)
+    if (!paths?.[0]) return
+    const wf = await ensureWorkingCopy()
+    if (!wf) return
+    await window.electronAPI?.pdfCommand('import_form_data', { input: wf, output: wf, source: paths[0] })
+    setFormsReloadKey(k => k + 1)
+    await reloadPdf()
+  }
+
+  const addFormField = async () => {
+    if (!pendingFormField || !activeFile || !formFieldConfig.name.trim()) return
+    const wf = await ensureWorkingCopy()
+    if (!wf) return
+    const rect = [pendingFormField.x / scale, pendingFormField.y / scale, (pendingFormField.x + pendingFormField.w) / scale, (pendingFormField.y + pendingFormField.h) / scale]
+    const choices = formFieldConfig.choices.split('\n').map(s => s.trim()).filter(Boolean)
+    await window.electronAPI?.pdfCommand('add_form_field', {
+      input: wf, output: wf, page: pageNumber - 1,
+      field_type: formFieldType, name: formFieldConfig.name.trim(),
+      rect, value: formFieldConfig.value,
+      ...(choices.length > 0 ? { choices } : {}),
+    })
+    setPendingFormField(null)
+    setFormsReloadKey(k => k + 1)
+    await reloadPdf()
+  }
+
   const togglePageSelect = (p: number) => {
     setSelectedPages(prev => {
       const next = new Set(prev)
@@ -591,12 +656,13 @@ export default function Editor() {
     if (tool === 'draw') { setCurrentPath([[x, y]]); setDrawing(true); return }
     if (tool === 'crop') { setPendingCrop(null); setDragRect({ x, y, w: 0, h: 0 }); setDrawing(true); return }
     if (tool === 'redact') { setDragRect({ x, y, w: 0, h: 0 }); setDrawing(true); return }
+    if (tool === 'formfield') { setPendingFormField(null); setDragRect({ x, y, w: 0, h: 0 }); setDrawing(true); return }
   }
 
   const onMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!drawing) return
     const [x, y] = relPos(e)
-    if ((tool === 'highlight' || tool === 'crop' || tool === 'redact') && dragRect) {
+    if ((tool === 'highlight' || tool === 'crop' || tool === 'redact' || tool === 'formfield') && dragRect) {
       setDragRect({ x: dragRect.x, y: dragRect.y, w: x - dragRect.x, h: y - dragRect.y })
     }
     if (tool === 'draw') {
@@ -625,6 +691,12 @@ export default function Editor() {
       const x = dragRect.w < 0 ? dragRect.x + dragRect.w : dragRect.x
       const y = dragRect.h < 0 ? dragRect.y + dragRect.h : dragRect.y
       setPendingRedacts(prev => [...prev, { page: pageNumber, x, y, w: Math.abs(dragRect.w), h: Math.abs(dragRect.h) }])
+    }
+    if (tool === 'formfield' && dragRect && Math.abs(dragRect.w) > 10 && Math.abs(dragRect.h) > 10) {
+      const x = dragRect.w < 0 ? dragRect.x + dragRect.w : dragRect.x
+      const y = dragRect.h < 0 ? dragRect.y + dragRect.h : dragRect.y
+      setPendingFormField({ x, y, w: Math.abs(dragRect.w), h: Math.abs(dragRect.h) })
+      setFormFieldConfig({ name: '', choices: '', value: '' })
     }
     setDragRect(null)
     setCurrentPath([])
@@ -697,7 +769,7 @@ export default function Editor() {
   }
 
   const cursorFor: Record<Tool, string> = {
-    select: 'default', highlight: 'crosshair', draw: 'crosshair', text: 'text', erase: 'cell', crop: 'crosshair', redact: 'crosshair',
+    select: 'default', highlight: 'crosshair', draw: 'crosshair', text: 'text', erase: 'cell', crop: 'crosshair', redact: 'crosshair', formfield: 'crosshair',
   }
 
   const pageAnnotCount = (annotations.get(pageNumber) ?? []).length
@@ -780,10 +852,11 @@ export default function Editor() {
               {/* Icon-only tab bar */}
               <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.1)', flexShrink: 0 }}>
                 {([
-                  { id: 'files',    icon: <FileText size={13} />,     label: 'Files' },
-                  { id: 'pages',    icon: <LayoutGrid size={13} />,   label: 'Pages' },
-                  { id: 'outline',  icon: <BookOpen size={13} />,     label: 'Outline' },
-                  { id: 'comments', icon: <MessageSquare size={13} />, label: 'Comments' },
+                  { id: 'files',    icon: <FileText size={13} />,      label: 'Files' },
+                  { id: 'pages',    icon: <LayoutGrid size={13} />,    label: 'Pages' },
+                  { id: 'outline',  icon: <BookOpen size={13} />,      label: 'Outline' },
+                  { id: 'comments', icon: <MessageSquare size={13} />,  label: 'Comments' },
+                  { id: 'forms',    icon: <ClipboardList size={13} />,  label: 'Forms' },
                 ] as { id: typeof leftTab; icon: React.ReactNode; label: string }[]).map(({ id, icon, label }) => (
                   <button key={id} onClick={() => setLeftTab(id)} title={label} style={{ flex: 1, padding: '9px 0', background: 'none', border: 'none', borderBottom: leftTab === id ? '2px solid #6366f1' : '2px solid transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: leftTab === id ? '#a5b4fc' : 'var(--text-muted)', transition: 'color 0.12s' }}>
                     {icon}
@@ -832,6 +905,16 @@ export default function Editor() {
                 )}
                 {leftTab === 'comments' && (
                   <CommentsPanel annotations={annotations} pageNumber={pageNumber} onPageClick={goTo} />
+                )}
+                {leftTab === 'forms' && (
+                  <FormsPanel
+                    sourceFile={activeFile}
+                    workingFile={workingFile}
+                    reloadKey={formsReloadKey}
+                    onApply={applyFormFields}
+                    onExport={exportFormData}
+                    onImport={importFormData}
+                  />
                 )}
               </div>
             </div>
@@ -925,6 +1008,21 @@ export default function Editor() {
                 <TBtn onClick={() => setShowPermissions(o => !o)} active={showPermissions} title="PDF Permissions & Password">
                   <Lock size={13} />
                 </TBtn>
+
+                <Sep />
+
+                {/* Form field creation tool */}
+                <TBtn onClick={() => setTool('formfield')} active={tool === 'formfield'} title="Add Form Field">
+                  <ClipboardList size={13} />
+                </TBtn>
+                {tool === 'formfield' && (<>
+                  {(['text', 'checkbox', 'dropdown', 'radio'] as const).map(ft => (
+                    <button key={ft} onClick={() => setFormFieldType(ft)}
+                      style={{ padding: '4px 7px', borderRadius: 5, border: `1px solid ${formFieldType === ft ? 'rgba(59,130,246,0.6)' : 'rgba(255,255,255,0.1)'}`, background: formFieldType === ft ? 'rgba(59,130,246,0.2)' : 'rgba(255,255,255,0.06)', color: formFieldType === ft ? '#93c5fd' : 'var(--text-muted)', fontSize: 10, fontWeight: 600, cursor: 'pointer' }}>
+                      {ft === 'text' ? 'Text' : ft === 'checkbox' ? 'Check' : ft === 'dropdown' ? 'Drop' : 'Radio'}
+                    </button>
+                  ))}
+                </>)}
 
                 {pageAnnotCount > 0 && (
                   <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)' }}>{pageAnnotCount} annotation{pageAnnotCount !== 1 ? 's' : ''}</span>
@@ -1021,6 +1119,37 @@ export default function Editor() {
                               placeholder="Type here…"
                               style={{ background: 'rgba(255,255,200,0.95)', border: '1.5px solid #FACC15', borderRadius: 4, padding: '2px 6px', fontSize: 14, color: '#000', minWidth: 100, outline: 'none' }}
                             />
+                          </div>
+                        )}
+
+                        {/* Form field config popup */}
+                        {pendingFormField && tool === 'formfield' && (
+                          <div style={{
+                            position: 'absolute',
+                            top: Math.min(pendingFormField.y + pendingFormField.h + 8, (canvasDims?.h ?? 0) - 200),
+                            left: Math.max(pendingFormField.x, 0),
+                            zIndex: 1100, background: 'rgba(10,8,30,0.97)',
+                            border: '1px solid rgba(59,130,246,0.4)', borderRadius: 10, padding: 12,
+                            display: 'flex', flexDirection: 'column', gap: 8, minWidth: 200,
+                          }}>
+                            <input autoFocus placeholder="Field name (required)" value={formFieldConfig.name}
+                              onChange={e => setFormFieldConfig(c => ({ ...c, name: e.target.value }))}
+                              style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 6, padding: '5px 8px', color: 'var(--text-primary)', fontSize: 12, outline: 'none' }} />
+                            {(formFieldType === 'dropdown' || formFieldType === 'radio') && (
+                              <textarea placeholder="Options (one per line)" value={formFieldConfig.choices}
+                                onChange={e => setFormFieldConfig(c => ({ ...c, choices: e.target.value }))}
+                                rows={3} style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 6, padding: '5px 8px', color: 'var(--text-primary)', fontSize: 12, outline: 'none', resize: 'vertical' }} />
+                            )}
+                            <div style={{ display: 'flex', gap: 5 }}>
+                              <button onClick={addFormField} disabled={!formFieldConfig.name.trim()}
+                                style={{ flex: 1, padding: '5px 8px', borderRadius: 6, border: '1px solid rgba(59,130,246,0.5)', background: formFieldConfig.name.trim() ? 'rgba(59,130,246,0.25)' : 'rgba(59,130,246,0.1)', color: formFieldConfig.name.trim() ? '#93c5fd' : 'var(--text-muted)', fontSize: 11, fontWeight: 600, cursor: formFieldConfig.name.trim() ? 'pointer' : 'default' }}>
+                                Add Field
+                              </button>
+                              <button onClick={() => setPendingFormField(null)}
+                                style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.06)', color: 'var(--text-muted)', fontSize: 11, cursor: 'pointer' }}>
+                                <X size={10} />
+                              </button>
+                            </div>
                           </div>
                         )}
 
@@ -1242,6 +1371,103 @@ function CtInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
 
 function CtSelect(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
   return <select {...props} style={{ background: 'rgba(30,25,60,0.95)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 7, padding: '7px 10px', color: 'var(--text-primary)', fontSize: 13, outline: 'none', width: '100%', ...props.style }} />
+}
+
+// ── Forms panel ──────────────────────────────────────────────────────────────
+
+interface FormFieldItem { name: string; type: string; value: string; page: number; rect: number[]; choices: string[] }
+
+function FormsPanel({ sourceFile, workingFile, reloadKey, onApply, onExport, onImport }: {
+  sourceFile: string | null; workingFile: string | null; reloadKey: number
+  onApply: (fields: Record<string, string>) => Promise<void>
+  onExport: (format: 'json' | 'csv') => Promise<void>
+  onImport: () => Promise<void>
+}) {
+  const [fields, setFields]   = useState<FormFieldItem[]>([])
+  const [values, setValues]   = useState<Record<string, string>>({})
+  const [loading, setLoading] = useState(false)
+  const [dirty,   setDirty]   = useState(false)
+  const [busy,    setBusy]    = useState(false)
+
+  const effectiveFile = workingFile ?? sourceFile
+
+  useEffect(() => {
+    if (!effectiveFile) { setFields([]); return }
+    setLoading(true)
+    window.electronAPI?.pdfCommand('get_form_fields', { input: effectiveFile })
+      .then(res => {
+        const f = ((res as { fields?: FormFieldItem[] }).fields) ?? []
+        setFields(f)
+        const v: Record<string, string> = {}
+        for (const field of f) v[field.name] = field.value ?? ''
+        setValues(v); setDirty(false)
+      })
+      .catch(() => setFields([]))
+      .finally(() => setLoading(false))
+  }, [effectiveFile, reloadKey])
+
+  if (!sourceFile) return <Empty>No PDF open</Empty>
+  if (loading)     return <Empty>Loading…</Empty>
+  if (fields.length === 0) return (
+    <Empty>No form fields found.<br /><span style={{ fontSize: 11 }}>Use the Form Field tool (toolbar) to add one.</span></Empty>
+  )
+
+  const changed = (name: string, val: string) => { setValues(v => ({ ...v, [name]: val })); setDirty(true) }
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '8px 8px 0', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {fields.map(f => (
+          <div key={f.name} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600, paddingLeft: 1 }}>
+              {f.name} <span style={{ fontWeight: 400, opacity: 0.65 }}>p.{f.page + 1}</span>
+            </span>
+            {f.type === 'CheckBox' ? (
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12, color: 'var(--text-secondary)', padding: '3px 4px' }}>
+                <input type="checkbox" checked={values[f.name] === 'Yes'}
+                  onChange={e => changed(f.name, e.target.checked ? 'Yes' : 'Off')}
+                  style={{ accentColor: '#6366f1', width: 13, height: 13, cursor: 'pointer' }} />
+                {values[f.name] === 'Yes' ? 'Checked' : 'Unchecked'}
+              </label>
+            ) : f.type === 'RadioButton' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 3, paddingLeft: 4 }}>
+                {f.choices.map(c => (
+                  <label key={c} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12, color: 'var(--text-secondary)' }}>
+                    <input type="radio" name={f.name} value={c} checked={values[f.name] === c}
+                      onChange={() => changed(f.name, c)}
+                      style={{ accentColor: '#6366f1', cursor: 'pointer' }} />
+                    {c}
+                  </label>
+                ))}
+              </div>
+            ) : (f.type === 'ComboBox' || f.type === 'ListBox') && f.choices.length > 0 ? (
+              <select value={values[f.name]} onChange={e => changed(f.name, e.target.value)}
+                style={{ background: 'rgba(30,25,60,0.95)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 6, padding: '5px 8px', color: 'var(--text-primary)', fontSize: 12, outline: 'none' }}>
+                <option value="">— Select —</option>
+                {f.choices.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            ) : (
+              <input value={values[f.name] ?? ''} onChange={e => changed(f.name, e.target.value)}
+                style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 6, padding: '5px 8px', color: 'var(--text-primary)', fontSize: 12, outline: 'none' }} />
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 5, borderTop: '1px solid rgba(255,255,255,0.08)', flexShrink: 0 }}>
+        <button onClick={async () => { setBusy(true); try { await onApply(values) } finally { setBusy(false) } }}
+          disabled={!dirty || busy}
+          style={{ padding: '6px', borderRadius: 7, border: 'none', background: (!dirty || busy) ? 'rgba(99,102,241,0.14)' : 'linear-gradient(135deg,#6366f1,#8b5cf6)', color: (!dirty || busy) ? 'var(--text-muted)' : 'white', fontSize: 11, fontWeight: 700, cursor: (!dirty || busy) ? 'default' : 'pointer' }}>
+          {busy ? 'Applying…' : dirty ? 'Apply to PDF' : 'No changes'}
+        </button>
+        <div style={{ display: 'flex', gap: 4 }}>
+          <button onClick={() => onExport('json')} style={{ flex: 1, padding: '5px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)', fontSize: 10, fontWeight: 600, cursor: 'pointer' }}>JSON</button>
+          <button onClick={() => onExport('csv')}  style={{ flex: 1, padding: '5px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)', fontSize: 10, fontWeight: 600, cursor: 'pointer' }}>CSV</button>
+          <button onClick={onImport} style={{ flex: 1, padding: '5px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)', fontSize: 10, fontWeight: 600, cursor: 'pointer' }}>Import</button>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 // ── Permissions modal ─────────────────────────────────────────────────────────

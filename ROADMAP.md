@@ -35,10 +35,10 @@ Cross off items as they are completed.
 - [x] Permission controls (restrict printing / copying / editing independently)
 - [ ] Digital signatures — skipped for now (see Future section)
 
-## Phase 6 — Forms
-- [ ] Fill existing PDF form fields
-- [ ] Create interactive form fields (text box, checkbox, radio, dropdown, signature)
-- [ ] Export / import form data (JSON / CSV)
+## Phase 6 — Forms ✅ DONE
+- [x] Fill existing PDF form fields (Forms panel in left sidebar)
+- [x] Create interactive form fields — text, checkbox, radio, dropdown (draw-to-place tool)
+- [x] Export form data to JSON / CSV; import from JSON / CSV
 
 ## Phase 7 — OCR
 - [ ] Tesseract integration to recognise text in scanned / image-based PDFs
