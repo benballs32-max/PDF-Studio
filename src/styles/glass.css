@@ -57,8 +57,9 @@
   border-radius: 999px;
   font-size: 12px;
   font-weight: 500;
-  background: var(--accent-light);
-  border: 1px solid rgba(99,102,241,0.3);
-  color: #a5b4fc;
+  background: linear-gradient(135deg, rgba(244,63,94,0.15), rgba(168,85,247,0.12));
+  border: 1px solid rgba(244,63,94,0.28);
+  color: #fda4af;
   backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }

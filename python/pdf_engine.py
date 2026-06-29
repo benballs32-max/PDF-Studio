@@ -268,19 +268,22 @@ def url_to_pdf(url: str, output: str, **_):
 
 def add_watermark(input: str, output: str, text: str, opacity: float = 0.3,
                   angle: float = 45, font_size: float = 60, color: list = None, **_):
-    import fitz, math
+    import fitz
     col = tuple(color) if color else (0.65, 0.65, 0.65)
     doc = fitz.open(input)
     for page in doc:
         r = page.rect
-        # Estimate text half-width to centre the diagonal watermark on the page
+        center = fitz.Point(r.width / 2, r.height / 2)
+        # Offset start so text appears centred around the page centre after rotation
         half_w = len(text) * font_size * 0.28
-        a = math.radians(angle)
-        ix = r.width  / 2 - half_w * math.cos(a)
-        iy = r.height / 2 + half_w * math.sin(a)
-        page.insert_text(fitz.Point(ix, iy), text,
-                         fontname="helv", fontsize=font_size,
-                         color=col, rotate=int(angle), overlay=True)
+        start = fitz.Point(center.x - half_w, center.y + font_size * 0.25)
+        page.insert_text(
+            start, text,
+            fontname="helv", fontsize=font_size,
+            color=col,
+            morph=(center, fitz.Matrix(angle)),
+            overlay=True,
+        )
     _save(doc, input, output)
     return {"success": True}
 
