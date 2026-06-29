@@ -5,15 +5,13 @@
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
-    "build:renderer": "tsc -p tsconfig.renderer.json && vite build",
-    "build:electron": "tsc -p tsconfig.electron.json",
+    "build": "vite build",
     "build:python": "pyinstaller python/pdf_engine.spec --distpath python/dist --workpath python/build --noconfirm",
-    "build": "npm run build:renderer && npm run build:electron",
     "dist": "npm run build && npm run build:python && electron-builder",
     "preview": "vite preview"
   },
   "keywords": [],
-  "author": "",
+  "author": "PDF Studio",
   "license": "ISC",
   "devDependencies": {
     "@types/node": "^20.0.0",

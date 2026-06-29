@@ -7,4 +7,6 @@ release/
 __pycache__/
 *.pyc
 *.pyo
+python/dist/
+python/build/
 .claude/

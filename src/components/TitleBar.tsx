@@ -2,24 +2,23 @@ import { useState } from 'react'
 import { Minus, Square, X } from 'lucide-react'
 
 const CONTROLS = [
-  { icon: <X size={9} />,     action: 'close',    color: '#ff5f57', hover: '#ff3b30' },
-  { icon: <Minus size={9} />, action: 'minimize', color: '#febc2e', hover: '#ffb900' },
-  { icon: <Square size={8} />,action: 'maximize', color: '#28c840', hover: '#24b835' },
+  { icon: <Minus size={10} />, action: 'minimize', hoverBg: 'rgba(255,255,255,0.1)' },
+  { icon: <Square size={9} />, action: 'maximize', hoverBg: 'rgba(255,255,255,0.1)' },
+  { icon: <X size={11} />,     action: 'close',    hoverBg: '#e81123' },
 ]
 
 export default function TitleBar() {
   const api = window.electronAPI
-  const [hovered, setHovered] = useState(false)
+  const [hoveredAction, setHoveredAction] = useState<string | null>(null)
 
   return (
     <div
       className="glass-sm"
       style={{
-        height: 44,
+        height: 36,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: '0 16px',
         WebkitAppRegion: 'drag' as never,
         borderRadius: 0,
         borderLeft: 'none',
@@ -30,13 +29,24 @@ export default function TitleBar() {
         zIndex: 100,
       } as React.CSSProperties}
     >
-      {/* Traffic lights */}
+      {/* App title */}
+      <span style={{
+        paddingLeft: 16,
+        fontSize: 12,
+        fontWeight: 600,
+        color: 'rgba(255,255,255,0.45)',
+        letterSpacing: '0.04em',
+        userSelect: 'none',
+        pointerEvents: 'none',
+      }}>
+        PDF Studio
+      </span>
+
+      {/* Windows-style controls — right side */}
       <div
-        style={{ display: 'flex', gap: 8, WebkitAppRegion: 'no-drag', alignItems: 'center' } as React.CSSProperties}
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
+        style={{ display: 'flex', WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       >
-        {CONTROLS.map(({ icon, action, color, hover }) => (
+        {CONTROLS.map(({ icon, action, hoverBg }) => (
           <button
             key={action}
             onClick={() => {
@@ -44,35 +54,28 @@ export default function TitleBar() {
               else if (action === 'minimize') api?.minimize()
               else api?.maximize()
             }}
+            onMouseEnter={() => setHoveredAction(action)}
+            onMouseLeave={() => setHoveredAction(null)}
             style={{
-              width: 13, height: 13, borderRadius: '50%',
-              border: 'none', cursor: 'pointer',
-              background: color,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              color: 'rgba(0,0,0,0.65)',
-              transition: 'background 0.12s, transform 0.1s',
+              width: 46,
+              height: 36,
+              border: 'none',
+              cursor: 'pointer',
+              background: hoveredAction === action ? hoverBg : 'transparent',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: hoveredAction === action && action === 'close'
+                ? '#ffffff'
+                : 'rgba(255,255,255,0.65)',
+              transition: 'background 0.1s, color 0.1s',
               flexShrink: 0,
-              boxShadow: `0 0 0 0.5px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.2)`,
             }}
-            onMouseEnter={e => { e.currentTarget.style.background = hover; e.currentTarget.style.transform = 'scale(1.1)' }}
-            onMouseLeave={e => { e.currentTarget.style.background = color; e.currentTarget.style.transform = 'scale(1)' }}
           >
-            <span style={{ opacity: hovered ? 1 : 0, transition: 'opacity 0.1s', lineHeight: 0 }}>{icon}</span>
+            {icon}
           </button>
         ))}
       </div>
-
-      {/* Centered title */}
-      <span style={{
-        position: 'absolute', left: '50%', transform: 'translateX(-50%)',
-        fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.45)',
-        letterSpacing: '0.04em', userSelect: 'none', pointerEvents: 'none',
-      }}>
-        PDF Studio
-      </span>
-
-      {/* Right spacer to balance traffic lights */}
-      <div style={{ width: 53 }} />
     </div>
   )
 }
