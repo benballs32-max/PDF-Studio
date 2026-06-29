@@ -17,7 +17,8 @@ import {
 import 'react-pdf/dist/Page/AnnotationLayer.css'
 import 'react-pdf/dist/Page/TextLayer.css'
 
-pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs'
+// Use a document-relative URL so this works under both http:// (dev) and file:// (production)
+pdfjs.GlobalWorkerOptions.workerSrc = new URL('./pdf.worker.min.mjs', window.location.href).href
 
 type Tool = 'select' | 'highlight' | 'draw' | 'text' | 'erase' | 'crop' | 'redact' | 'formfield'
 interface Reply { id: string; content: string; ts: number }
