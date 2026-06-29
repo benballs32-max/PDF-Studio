@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   FileText, Wand2, ArrowRightLeft, Scissors, Merge, RotateCw,
   FileImage, FileType, FileSpreadsheet, Globe, Clock, X, Plus,
-  ShieldCheck, Upload,
+  ShieldCheck, Upload, Package, Columns,
 } from 'lucide-react'
 import { getRecentFiles, addRecentFile, removeRecentFile, clearRecentFiles, type RecentFile } from '../utils/recentFiles'
 
@@ -92,6 +92,22 @@ const tools: Tool[] = [
     route: '/convert?tab=security',
     color: '#f59e0b',
     glow: 'rgba(245,158,11,0.28)',
+  },
+  {
+    icon: <Package size={19} />,
+    label: 'Batch',
+    description: 'Process an entire folder at once',
+    route: '/batch',
+    color: '#06b6d4',
+    glow: 'rgba(6,182,212,0.28)',
+  },
+  {
+    icon: <Columns size={19} />,
+    label: 'Compare',
+    description: 'Side-by-side diff of two PDFs',
+    route: '/compare',
+    color: '#ec4899',
+    glow: 'rgba(236,72,153,0.28)',
   },
 ]
 

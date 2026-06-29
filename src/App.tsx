@@ -4,6 +4,8 @@ import Home from './pages/Home'
 import Editor from './pages/Editor'
 import Converter from './pages/Converter'
 import ImportPDF from './pages/ImportPDF'
+import Batch from './pages/Batch'
+import Compare from './pages/Compare'
 import './styles/glass.css'
 
 export default function App() {
@@ -26,6 +28,8 @@ export default function App() {
           <Route path="/editor" element={<Editor />} />
           <Route path="/convert" element={<Converter />} />
           <Route path="/import" element={<ImportPDF />} />
+          <Route path="/batch" element={<Batch />} />
+          <Route path="/compare" element={<Compare />} />
         </Routes>
       </div>
     </div>

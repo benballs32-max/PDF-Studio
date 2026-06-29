@@ -17,10 +17,11 @@ import 'react-pdf/dist/Page/TextLayer.css'
 pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs'
 
 type Tool = 'select' | 'highlight' | 'draw' | 'text' | 'erase' | 'crop' | 'redact' | 'formfield'
+interface Reply { id: string; content: string; ts: number }
 type AnnotShape =
-  | { type: 'highlight'; x: number; y: number; w: number; h: number; color: string }
-  | { type: 'draw'; pts: [number, number][]; color: string; lw: number }
-  | { type: 'text'; x: number; y: number; content: string; color: string }
+  | { type: 'highlight'; x: number; y: number; w: number; h: number; color: string; replies?: Reply[] }
+  | { type: 'draw'; pts: [number, number][]; color: string; lw: number; replies?: Reply[] }
+  | { type: 'text'; x: number; y: number; content: string; color: string; replies?: Reply[] }
 type Annot = AnnotShape & { id: string; page: number }
 
 const COLORS = ['#FACC15', '#34D399', '#60A5FA', '#F87171', '#C084FC', '#000000']
@@ -87,7 +88,12 @@ export default function Editor() {
   const [tool, setTool] = useState<Tool>('select')
   const [color, setColor] = useState(COLORS[0])
   const [lineWidth, setLineWidth] = useState(3)
-  const [annotations, setAnnotations] = useState<Map<number, Annot[]>>(new Map())
+  const [annotations, _setAnnotations] = useState<Map<number, Annot[]>>(new Map())
+  const annotationsRef = useRef<Map<number, Annot[]>>(new Map())
+  const annotHistoryRef = useRef<Map<number, Annot[]>[]>([new Map()])
+  const historyIdxRef = useRef(0)
+  const wasErasingRef = useRef(false)
+  const setAnnotations = (m: Map<number, Annot[]>) => { annotationsRef.current = m; _setAnnotations(m) }
   const [drawing, setDrawing] = useState(false)
   const [currentPath, setCurrentPath] = useState<[number, number][]>([])
   const [dragRect, setDragRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
@@ -212,15 +218,22 @@ export default function Editor() {
     if (matches.length > 0) setPageNumber(matches[0].page)
   }, [searchQuery, textIndex])
 
-  // ── Ctrl+F opens search; Escape closes it ───────────────────────────────────
+  // ── Keyboard shortcuts ───────────────────────────────────────────────────────
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
         e.preventDefault(); setSearchOpen(true)
       }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault(); undoAnnot()
+      }
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+        e.preventDefault(); redoAnnot()
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Focus search input when bar opens
@@ -626,32 +639,59 @@ export default function Editor() {
 
   // ── Annotation helpers ──────────────────────────────────────────────────────
   const uid = () => Math.random().toString(36).slice(2)
+
+  const commitToHistory = (newMap: Map<number, Annot[]>) => {
+    annotHistoryRef.current = annotHistoryRef.current.slice(0, historyIdxRef.current + 1)
+    annotHistoryRef.current.push(new Map([...newMap].map(([k, v]) => [k, v.map(a => ({ ...a }))])))
+    historyIdxRef.current = annotHistoryRef.current.length - 1
+    setAnnotations(newMap)
+  }
+  const undoAnnot = () => {
+    if (historyIdxRef.current <= 0) return
+    historyIdxRef.current--
+    setAnnotations(new Map([...annotHistoryRef.current[historyIdxRef.current]].map(([k, v]) => [k, v.map(a => ({ ...a }))])))
+  }
+  const redoAnnot = () => {
+    if (historyIdxRef.current >= annotHistoryRef.current.length - 1) return
+    historyIdxRef.current++
+    setAnnotations(new Map([...annotHistoryRef.current[historyIdxRef.current]].map(([k, v]) => [k, v.map(a => ({ ...a }))])))
+  }
+  const addReply = (annotId: string, content: string) => {
+    if (!content.trim()) return
+    const next = new Map(annotationsRef.current)
+    for (const [pg, annots] of next.entries()) {
+      const idx = annots.findIndex(a => a.id === annotId)
+      if (idx !== -1) {
+        const updated = { ...annots[idx], replies: [...(annots[idx].replies ?? []), { id: uid(), content: content.trim(), ts: Date.now() }] }
+        next.set(pg, [...annots.slice(0, idx), updated as Annot, ...annots.slice(idx + 1)])
+        commitToHistory(next)
+        break
+      }
+    }
+  }
+
   const relPos = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const r = overlayRef.current!.getBoundingClientRect()
     return [e.clientX - r.left, e.clientY - r.top] as [number, number]
   }
 
-  const addAnnot = (a: Omit<Annot, 'id' | 'page'>) => {
-    setAnnotations(prev => {
-      const next = new Map(prev)
-      const existing = next.get(pageNumber) ?? []
-      next.set(pageNumber, [...existing, { ...a, id: uid(), page: pageNumber } as Annot])
-      return next
-    })
+  const addAnnot = (a: AnnotShape) => {
+    const next = new Map(annotationsRef.current)
+    const existing = next.get(pageNumber) ?? []
+    next.set(pageNumber, [...existing, { ...a, id: uid(), page: pageNumber } as Annot])
+    commitToHistory(next)
   }
 
   const eraseAt = (x: number, y: number) => {
-    setAnnotations(prev => {
-      const next = new Map(prev)
-      const existing = next.get(pageNumber) ?? []
-      next.set(pageNumber, existing.filter(a => {
-        if (a.type === 'highlight') return !(x >= a.x && x <= a.x + a.w && y >= a.y && y <= a.y + a.h)
-        if (a.type === 'text') return !(x >= a.x && x <= a.x + 120 && y >= a.y && y <= a.y + 20)
-        if (a.type === 'draw') return !a.pts.some(([px, py]) => Math.hypot(px - x, py - y) < 12)
-        return true
-      }))
-      return next
-    })
+    const next = new Map(annotationsRef.current)
+    const existing = next.get(pageNumber) ?? []
+    next.set(pageNumber, existing.filter(a => {
+      if (a.type === 'highlight') return !(x >= a.x && x <= a.x + a.w && y >= a.y && y <= a.y + a.h)
+      if (a.type === 'text') return !(x >= a.x && x <= a.x + 120 && y >= a.y && y <= a.y + 20)
+      if (a.type === 'draw') return !a.pts.some(([px, py]) => Math.hypot(px - x, py - y) < 12)
+      return true
+    }))
+    setAnnotations(next)
   }
 
   // ── Canvas mouse events ─────────────────────────────────────────────────────
@@ -660,7 +700,7 @@ export default function Editor() {
     const [x, y] = relPos(e)
 
     if (tool === 'text') { setTextTarget({ x, y }); setTextVal(''); return }
-    if (tool === 'erase') { eraseAt(x, y); return }
+    if (tool === 'erase') { wasErasingRef.current = true; eraseAt(x, y); return }
     if (tool === 'highlight') { setDragRect({ x, y, w: 0, h: 0 }); setDrawing(true); return }
     if (tool === 'draw') { setCurrentPath([[x, y]]); setDrawing(true); return }
     if (tool === 'crop') { setPendingCrop(null); setDragRect({ x, y, w: 0, h: 0 }); setDrawing(true); return }
@@ -681,6 +721,10 @@ export default function Editor() {
   }
 
   const onMouseUp = () => {
+    if (wasErasingRef.current) {
+      commitToHistory(annotationsRef.current)
+      wasErasingRef.current = false
+    }
     if (!drawing) return
     setDrawing(false)
     if (tool === 'highlight' && dragRect && Math.abs(dragRect.w) > 4 && Math.abs(dragRect.h) > 4) {
@@ -920,7 +964,7 @@ export default function Editor() {
                   <OutlinePanel sourceFile={activeFile} onPageClick={goTo} />
                 )}
                 {leftTab === 'comments' && (
-                  <CommentsPanel annotations={annotations} pageNumber={pageNumber} onPageClick={goTo} />
+                  <CommentsPanel annotations={annotations} pageNumber={pageNumber} onPageClick={goTo} onAddReply={addReply} />
                 )}
                 {leftTab === 'forms' && (
                   <FormsPanel
@@ -1141,6 +1185,16 @@ export default function Editor() {
                   <SbTool icon={<Type size={14} />} label="Text" sublabel="Click to add a note" active={tool === 'text'} onClick={() => setTool('text')} />
                   {tool === 'text' && <SbColorPicker color={color} onChange={setColor} />}
                   <SbTool icon={<Eraser size={14} />} label="Erase" sublabel="Remove annotations" active={tool === 'erase'} onClick={() => setTool('erase')} />
+                  <div style={{ display: 'flex', gap: 4, padding: '3px 10px 5px' }}>
+                    <button onClick={undoAnnot} title="Undo (Ctrl+Z)"
+                      style={{ flex: 1, padding: '4px 6px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)', fontSize: 11, cursor: 'pointer' }}>
+                      ↩ Undo
+                    </button>
+                    <button onClick={redoAnnot} title="Redo (Ctrl+Y)"
+                      style={{ flex: 1, padding: '4px 6px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)', fontSize: 11, cursor: 'pointer' }}>
+                      ↪ Redo
+                    </button>
+                  </div>
                 </SbSection>
 
                 <SbSection title="Page">
@@ -1662,11 +1716,15 @@ function OutlinePanel({ sourceFile, onPageClick }: {
 
 // ── Comments panel (Annotations list tab) ────────────────────────────────────
 
-function CommentsPanel({ annotations, pageNumber, onPageClick }: {
+function CommentsPanel({ annotations, pageNumber, onPageClick, onAddReply }: {
   annotations: Map<number, Annot[]>
   pageNumber: number
   onPageClick: (p: number) => void
+  onAddReply: (annotId: string, content: string) => void
 }) {
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [replyText, setReplyText] = useState('')
+
   const all = Array.from(annotations.entries())
     .sort(([a], [b]) => a - b)
     .flatMap(([pg, annots]) => annots.map(a => ({ ...a, pg })))
@@ -1680,31 +1738,78 @@ function CommentsPanel({ annotations, pageNumber, onPageClick }: {
     )
   }
 
+  const submitReply = (annotId: string) => {
+    if (!replyText.trim()) return
+    onAddReply(annotId, replyText)
+    setReplyText('')
+  }
+
   return (
     <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4, padding: '6px 6px' }}>
       {all.map(a => {
         const isCurrent = a.pg === pageNumber
+        const isExpanded = expandedId === a.id
         const TypeIcon = a.type === 'highlight' ? Highlighter : a.type === 'draw' ? PenLine : Type
         const preview = a.type === 'text' ? a.content : a.type === 'highlight' ? 'Highlight' : 'Drawing'
+        const replyCount = a.replies?.length ?? 0
         return (
-          <button
-            key={a.id}
-            onClick={() => onPageClick(a.pg)}
-            style={{
-              display: 'flex', flexDirection: 'column', gap: 3,
-              padding: '6px 8px', borderRadius: 6, border: 'none', cursor: 'pointer', textAlign: 'left', width: '100%',
-              background: isCurrent ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.04)',
-              borderLeft: `3px solid ${a.color}`,
-            }}
-            onMouseEnter={e => { e.currentTarget.style.background = isCurrent ? 'rgba(99,102,241,0.22)' : 'rgba(255,255,255,0.09)' }}
-            onMouseLeave={e => { e.currentTarget.style.background = isCurrent ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.04)' }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-              <TypeIcon size={10} color={a.color} />
-              <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Page {a.pg}</span>
-            </div>
-            <span style={{ fontSize: 11, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{preview}</span>
-          </button>
+          <div key={a.id} style={{ borderRadius: 6, overflow: 'hidden', border: `1px solid ${isExpanded ? 'rgba(99,102,241,0.3)' : 'transparent'}` }}>
+            <button
+              onClick={() => {
+                onPageClick(a.pg)
+                setExpandedId(isExpanded ? null : a.id)
+                setReplyText('')
+              }}
+              style={{
+                display: 'flex', flexDirection: 'column', gap: 3, width: '100%',
+                padding: '6px 8px', border: 'none', cursor: 'pointer', textAlign: 'left',
+                background: isCurrent ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.04)',
+                borderLeft: `3px solid ${a.color}`,
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = isCurrent ? 'rgba(99,102,241,0.22)' : 'rgba(255,255,255,0.09)' }}
+              onMouseLeave={e => { e.currentTarget.style.background = isCurrent ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.04)' }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <TypeIcon size={10} color={a.color} />
+                <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Page {a.pg}</span>
+                {replyCount > 0 && (
+                  <span style={{ marginLeft: 'auto', fontSize: 9, color: '#a5b4fc', background: 'rgba(99,102,241,0.2)', padding: '1px 5px', borderRadius: 99 }}>
+                    {replyCount} repl{replyCount === 1 ? 'y' : 'ies'}
+                  </span>
+                )}
+              </div>
+              <span style={{ fontSize: 11, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{preview}</span>
+            </button>
+
+            {/* Thread: replies + reply input */}
+            {isExpanded && (
+              <div style={{ background: 'rgba(0,0,0,0.2)', padding: '6px 8px 8px', display: 'flex', flexDirection: 'column', gap: 5 }}>
+                {(a.replies ?? []).map(r => (
+                  <div key={r.id} style={{ display: 'flex', flexDirection: 'column', gap: 1, paddingLeft: 8, borderLeft: '2px solid rgba(255,255,255,0.12)' }}>
+                    <span style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.4 }}>{r.content}</span>
+                    <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{new Date(r.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                  </div>
+                ))}
+                <div style={{ display: 'flex', gap: 5, marginTop: 2 }}>
+                  <input
+                    autoFocus
+                    value={replyText}
+                    onChange={e => setReplyText(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') { e.preventDefault(); submitReply(a.id) }
+                      if (e.key === 'Escape') { setExpandedId(null); setReplyText('') }
+                    }}
+                    placeholder="Add reply… (Enter to send)"
+                    style={{ flex: 1, background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 5, padding: '4px 7px', color: 'var(--text-primary)', fontSize: 11, outline: 'none' }}
+                  />
+                  <button onClick={() => submitReply(a.id)}
+                    style={{ padding: '4px 8px', borderRadius: 5, border: 'none', background: 'rgba(99,102,241,0.3)', color: '#a5b4fc', fontSize: 11, cursor: 'pointer' }}>
+                    →
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         )
       })}
     </div>

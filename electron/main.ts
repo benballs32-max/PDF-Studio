@@ -109,8 +109,12 @@ ipcMain.handle('dialog:savePath', async (_, ext: string) => {
 // IPC: read local file as binary
 ipcMain.handle('fs:readFile', async (_, filePath: string) => {
   const buffer = await readFile(filePath)
-  // Return as data URL — avoids Uint8Array serialisation issues through contextBridge
-  return `data:application/pdf;base64,${buffer.toString('base64')}`
+  const ext = filePath.toLowerCase().split('.').pop() ?? ''
+  const mimeMap: Record<string, string> = {
+    pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+  }
+  const mime = mimeMap[ext] ?? 'application/octet-stream'
+  return `data:${mime};base64,${buffer.toString('base64')}`
 })
 
 // IPC: select output directory

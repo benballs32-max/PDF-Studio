@@ -574,6 +574,42 @@ def decrypt_pdf(input: str, output: str, password: str, **_):
     doc.save(output, encryption=fitz.PDF_ENCRYPT_NONE)
     return {"success": True}
 
+def compare_pages(input_a: str, input_b: str, output: str,
+                  page_a: int = 0, page_b: int = 0, dpi: int = 150, **_):
+    """Render two PDF pages and produce a visual diff image (red highlights = changed pixels)."""
+    import fitz
+    from PIL import Image, ImageChops
+    import io
+
+    mat = fitz.Matrix(dpi / 72, dpi / 72)
+
+    doc_a = fitz.open(input_a)
+    pix_a = doc_a[min(page_a, len(doc_a) - 1)].get_pixmap(matrix=mat, alpha=False)
+    img_a = Image.open(io.BytesIO(pix_a.tobytes("png"))).convert("RGB")
+    doc_a.close()
+
+    doc_b = fitz.open(input_b)
+    pix_b = doc_b[min(page_b, len(doc_b) - 1)].get_pixmap(matrix=mat, alpha=False)
+    img_b = Image.open(io.BytesIO(pix_b.tobytes("png"))).convert("RGB")
+    doc_b.close()
+
+    if img_a.size != img_b.size:
+        img_b = img_b.resize(img_a.size, Image.LANCZOS)
+
+    diff = ImageChops.difference(img_a, img_b)
+    diff_gray = diff.convert("L")
+    mask = diff_gray.point(lambda p: 255 if p > 15 else 0)
+
+    red = Image.new("RGB", img_a.size, (255, 60, 60))
+    result = Image.composite(red, img_a, mask)
+    result.save(output, format="PNG")
+
+    pixels = list(mask.getdata())
+    changed = sum(1 for p in pixels if p > 0)
+    total = len(pixels)
+    changed_pct = round(changed / total * 100, 1) if total > 0 else 0
+    return {"success": True, "changed_pct": changed_pct, "width": img_a.width, "height": img_a.height}
+
 COMMANDS = {
     "to_text": to_text,
     "to_html": to_html,
@@ -604,6 +640,7 @@ COMMANDS = {
     "set_permissions": set_permissions,
     "encrypt_pdf": encrypt_pdf,
     "decrypt_pdf": decrypt_pdf,
+    "compare_pages": compare_pages,
     "reorder_pages": reorder_pages,
     "extract_pages": extract_pages,
     "insert_pages": insert_pages,
