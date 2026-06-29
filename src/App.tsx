@@ -6,6 +6,7 @@ import Converter from './pages/Converter'
 import ImportPDF from './pages/ImportPDF'
 import Batch from './pages/Batch'
 import Compare from './pages/Compare'
+import Settings from './pages/Settings'
 import './styles/glass.css'
 
 export default function App() {
@@ -30,6 +31,7 @@ export default function App() {
           <Route path="/import" element={<ImportPDF />} />
           <Route path="/batch" element={<Batch />} />
           <Route path="/compare" element={<Compare />} />
+          <Route path="/settings" element={<Settings />} />
         </Routes>
       </div>
     </div>

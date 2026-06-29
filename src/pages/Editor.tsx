@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect, useLayoutEffect } from 'react
 import { motion, AnimatePresence } from 'framer-motion'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { addRecentFile } from '../utils/recentFiles'
+import { askAI, hasAIConfigured, truncateForContext, type AIMessage } from '../utils/ai'
 import { Document, Page, pdfjs } from 'react-pdf'
 import {
   ArrowLeft, Upload, FileText, ChevronLeft, ChevronRight,
@@ -11,6 +12,7 @@ import {
   BookOpen, MessageSquare, Layers, EyeOff, Lock,
   ClipboardList, Circle, ScanText, Info, Layers2, ImageDown,
   Printer, Replace, HelpCircle, FilePlus2, Scissors,
+  Sparkles, Send, Loader2, RotateCcw, Languages, UserCheck, Settings,
 } from 'lucide-react'
 import 'react-pdf/dist/Page/AnnotationLayer.css'
 import 'react-pdf/dist/Page/TextLayer.css'
@@ -111,7 +113,7 @@ export default function Editor() {
   const [matchIdx, setMatchIdx] = useState(0)
 
   // Page management
-  const [leftTab, setLeftTab] = useState<'files' | 'pages' | 'outline' | 'comments' | 'forms'>('files')
+  const [leftTab, setLeftTab] = useState<'files' | 'pages' | 'outline' | 'comments' | 'forms' | 'ai'>('files')
   const [selectedPages, setSelectedPages] = useState<Set<number>>(new Set())
   const [dragPage, setDragPage] = useState<number | null>(null)
   const [dragOverPage, setDragOverPage] = useState<number | null>(null)
@@ -139,6 +141,15 @@ export default function Editor() {
   const [replaceQuery, setReplaceQuery] = useState('')
   const [findReplaceCount, setFindReplaceCount] = useState<number | null>(null)
   const replaceInputRef = useRef<HTMLInputElement>(null)
+
+  // AI
+  const [aiDocText, setAiDocText] = useState('')
+  const [aiMessages, setAiMessages] = useState<AIMessage[]>([])
+  const [aiInput, setAiInput] = useState('')
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiError, setAiError] = useState<string | null>(null)
+  const [aiClassification, setAiClassification] = useState<string | null>(null)
+  const aiChatEndRef = useRef<HTMLDivElement>(null)
 
   const viewerRef = useRef<HTMLDivElement>(null)
   const overlayRef = useRef<HTMLCanvasElement>(null)
@@ -380,6 +391,23 @@ export default function Editor() {
   useEffect(() => {
     if (textTarget) setTimeout(() => textInputRef.current?.focus(), 30)
   }, [textTarget])
+
+  // Auto-scroll AI chat to bottom
+  useEffect(() => {
+    aiChatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [aiMessages])
+
+  // Auto-classify document when a new file is opened
+  useEffect(() => {
+    if (!activeFile) { setAiClassification(null); setAiDocText(''); setAiMessages([]); return }
+    setAiDocText('')
+    setAiMessages([])
+    setAiClassification(null)
+    if (hasAIConfigured()) {
+      runClassify()
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeFile])
 
   // ── File management ─────────────────────────────────────────────────────────
   const addFiles = useCallback((paths: string[]) => {
@@ -680,6 +708,115 @@ export default function Editor() {
     }
   }
 
+  // ── AI helpers ───────────────────────────────────────────────────────────────
+
+  const getDocText = async (): Promise<string> => {
+    if (aiDocText) return aiDocText
+    const src = workingFileRef.current ?? activeFile
+    if (!src) throw new Error('No PDF open.')
+    const res = await window.electronAPI?.pdfCommand('extract_text_full', { input: src }) as { full_text: string }
+    setAiDocText(res.full_text)
+    return res.full_text
+  }
+
+  const runSummarise = async () => {
+    if (!activeFile) return
+    if (!hasAIConfigured()) { alert('No AI provider configured. Open Settings to add an API key.'); return }
+    setLeftTab('ai')
+    setAiLoading(true)
+    setAiError(null)
+    try {
+      const text = await getDocText()
+      const prompt = `Summarise the following PDF document in clear, concise bullet points. Group by topic where relevant.\n\n${truncateForContext(text)}`
+      const newMessages: AIMessage[] = [{ role: 'user', content: 'Summarise this document' }]
+      setAiMessages(newMessages)
+      const reply = await askAI(newMessages, `You are a helpful PDF assistant. The document text is:\n\n${truncateForContext(text)}`)
+      setAiMessages([...newMessages, { role: 'assistant', content: reply }])
+    } catch (e) {
+      setAiError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setAiLoading(false)
+    }
+  }
+
+  const runClassify = async () => {
+    if (!activeFile) return
+    if (!hasAIConfigured()) { alert('No AI provider configured. Open Settings to add an API key.'); return }
+    try {
+      const text = await getDocText()
+      const reply = await askAI(
+        [{ role: 'user', content: 'What type of document is this? Reply with ONLY a short label (2-4 words), e.g. "Legal Contract", "Financial Report", "Invoice", "Technical Manual", "CV / Resume". No explanation.' }],
+        `Document text (first 4000 chars):\n\n${text.slice(0, 4000)}`
+      )
+      setAiClassification(reply.trim().replace(/[".]/g, ''))
+    } catch { /* silent */ }
+  }
+
+  const runSmartRedact = async () => {
+    if (!activeFile) return
+    if (!hasAIConfigured()) { alert('No AI provider configured. Open Settings to add an API key.'); return }
+    setLeftTab('ai')
+    setAiLoading(true)
+    setAiError(null)
+    try {
+      const text = await getDocText()
+      const sys = `You are a data privacy assistant. Identify all personally identifiable information (PII) in the document text. Return ONLY a JSON array of strings — the exact text strings that should be redacted. Include: full names, email addresses, phone numbers, physical addresses, national insurance / SSN numbers, dates of birth, bank account / card numbers, passport / driving licence numbers. No explanation, no markdown — just the JSON array.`
+      const reply = await askAI([{ role: 'user', content: truncateForContext(text, 30000) }], sys)
+      let items: string[] = []
+      try { items = JSON.parse(reply.trim()) } catch { items = [] }
+      if (!items.length) {
+        setAiMessages(m => [...m, { role: 'assistant', content: 'No PII detected in this document.' }])
+        return
+      }
+      setAiMessages(m => [...m, { role: 'assistant', content: `Found ${items.length} PII item(s) to redact:\n${items.map(s => `• ${s}`).join('\n')}\n\nSwitch to the Redact tool and these will be highlighted.` }])
+    } catch (e) {
+      setAiError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setAiLoading(false)
+    }
+  }
+
+  const runTranslate = async () => {
+    if (!activeFile) return
+    if (!hasAIConfigured()) { alert('No AI provider configured. Open Settings to add an API key.'); return }
+    const lang = window.prompt('Translate to (e.g. French, Spanish, German, Japanese):')
+    if (!lang?.trim()) return
+    setLeftTab('ai')
+    setAiLoading(true)
+    setAiError(null)
+    try {
+      const text = await getDocText()
+      const newMessages: AIMessage[] = [{ role: 'user', content: `Translate the document into ${lang}` }]
+      setAiMessages(newMessages)
+      const reply = await askAI(newMessages, `Translate the following PDF document text into ${lang}. Preserve structure and paragraph breaks.\n\n${truncateForContext(text)}`)
+      setAiMessages([...newMessages, { role: 'assistant', content: reply }])
+    } catch (e) {
+      setAiError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setAiLoading(false)
+    }
+  }
+
+  const sendAIMessage = async () => {
+    const content = aiInput.trim()
+    if (!content || aiLoading) return
+    if (!hasAIConfigured()) { alert('No AI provider configured. Open Settings to add an API key.'); return }
+    setAiInput('')
+    setAiError(null)
+    const updated: AIMessage[] = [...aiMessages, { role: 'user', content }]
+    setAiMessages(updated)
+    setAiLoading(true)
+    try {
+      const text = aiDocText || await getDocText()
+      const reply = await askAI(updated, `You are a helpful PDF assistant. Answer questions about the document. Document text:\n\n${truncateForContext(text)}`)
+      setAiMessages(m => [...m, { role: 'assistant', content: reply }])
+    } catch (e) {
+      setAiError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setAiLoading(false)
+    }
+  }
+
   const addFormField = async () => {
     if (!pendingFormField || !activeFile || !formFieldConfig.name.trim()) return
     const wf = await ensureWorkingCopy()
@@ -918,6 +1055,7 @@ export default function Editor() {
           </>
         )}
         <ToolBarBtn onClick={() => setShowShortcuts(true)} title="Keyboard shortcuts (?)"><HelpCircle size={13} /></ToolBarBtn>
+        <ToolBarBtn onClick={() => navigate('/settings')} title="Settings"><Settings size={13} /></ToolBarBtn>
         {activeFile && (
           <>
             {workingFile && (
@@ -1017,6 +1155,7 @@ export default function Editor() {
                   { id: 'outline',  icon: <BookOpen size={13} />,      label: 'Outline' },
                   { id: 'comments', icon: <MessageSquare size={13} />,  label: 'Comments' },
                   { id: 'forms',    icon: <ClipboardList size={13} />,  label: 'Forms' },
+                  { id: 'ai',       icon: <Sparkles size={13} />,       label: 'AI Chat' },
                 ] as { id: typeof leftTab; icon: React.ReactNode; label: string }[]).map(({ id, icon, label }) => (
                   <button key={id} onClick={() => setLeftTab(id)} title={label} style={{ flex: 1, padding: '9px 0', background: 'none', border: 'none', borderBottom: leftTab === id ? '2px solid #6366f1' : '2px solid transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: leftTab === id ? '#a5b4fc' : 'var(--text-muted)', transition: 'color 0.12s' }}>
                     {icon}
@@ -1074,6 +1213,19 @@ export default function Editor() {
                     onApply={applyFormFields}
                     onExport={exportFormData}
                     onImport={importFormData}
+                  />
+                )}
+                {leftTab === 'ai' && (
+                  <AIChatPanel
+                    messages={aiMessages}
+                    input={aiInput}
+                    loading={aiLoading}
+                    error={aiError}
+                    hasFile={!!activeFile}
+                    chatEndRef={aiChatEndRef}
+                    onInputChange={setAiInput}
+                    onSend={sendAIMessage}
+                    onClear={() => { setAiMessages([]); setAiError(null) }}
                   />
                 )}
               </div>
@@ -1342,6 +1494,13 @@ export default function Editor() {
                   <SbTool icon={<Info size={14} />} label="Metadata" sublabel="Title, author, keywords…" active={showMetadata} onClick={() => setShowMetadata(o => !o)} />
                   <SbTool icon={<ImageDown size={14} />} label="Extract Images" sublabel="Save embedded images to folder" onClick={runExtractImages} />
                   <SbTool icon={<Layers2 size={14} />} label="Flatten PDF" sublabel="Bake annotations permanently" onClick={runFlatten} />
+                </SbSection>
+
+                <SbSection title={`AI${aiClassification ? ` · ${aiClassification}` : ''}`}>
+                  <SbTool icon={<Sparkles size={14} />} label="Summarise" sublabel="AI bullet-point summary" onClick={runSummarise} />
+                  <SbTool icon={<Languages size={14} />} label="Translate" sublabel="Translate full document" onClick={runTranslate} />
+                  <SbTool icon={<UserCheck size={14} />} label="Smart Redact" sublabel="Find & redact PII with AI" onClick={runSmartRedact} />
+                  <SbTool icon={<MessageSquare size={14} />} label="Chat with PDF" sublabel="Ask questions about the doc" onClick={() => setLeftTab('ai')} />
                 </SbSection>
 
                 <SbSection title="Forms">
@@ -2205,6 +2364,91 @@ function ShortcutsModal({ onClose }: { onClose: () => void }) {
         </motion.div>
       </div>
     </>
+  )
+}
+
+// ── AI Chat Panel ────────────────────────────────────────────────────────────
+
+function AIChatPanel({ messages, input, loading, error, hasFile, chatEndRef, onInputChange, onSend, onClear }: {
+  messages: AIMessage[]
+  input: string
+  loading: boolean
+  error: string | null
+  hasFile: boolean
+  chatEndRef: React.RefObject<HTMLDivElement>
+  onInputChange: (v: string) => void
+  onSend: () => void
+  onClear: () => void
+}) {
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 10px 4px', borderBottom: '1px solid rgba(255,255,255,0.08)', flexShrink: 0 }}>
+        <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 5 }}>
+          <Sparkles size={11} /> AI Chat
+        </span>
+        {messages.length > 0 && (
+          <button onClick={onClear} title="Clear conversation"
+            style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 2, display: 'flex' }}>
+            <RotateCcw size={11} />
+          </button>
+        )}
+      </div>
+
+      {/* Messages */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {messages.length === 0 && !loading && (
+          <div style={{ color: 'var(--text-muted)', fontSize: 11, textAlign: 'center', marginTop: 20, lineHeight: 1.6 }}>
+            {hasFile
+              ? 'Ask anything about this document — or use the AI tools in the right sidebar.'
+              : 'Open a PDF to start chatting with AI.'}
+          </div>
+        )}
+        {messages.map((m, i) => (
+          <div key={i} style={{
+            padding: '7px 10px', borderRadius: 8, fontSize: 12, lineHeight: 1.55,
+            background: m.role === 'user' ? 'rgba(99,102,241,0.18)' : 'rgba(255,255,255,0.06)',
+            border: `1px solid ${m.role === 'user' ? 'rgba(99,102,241,0.3)' : 'rgba(255,255,255,0.08)'}`,
+            color: m.role === 'user' ? '#c7d2fe' : 'var(--text-primary)',
+            alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
+            maxWidth: '92%',
+            whiteSpace: 'pre-wrap',
+          }}>
+            {m.content}
+          </div>
+        ))}
+        {loading && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-muted)', fontSize: 11, alignSelf: 'flex-start' }}>
+            <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> Thinking…
+          </div>
+        )}
+        {error && (
+          <div style={{ padding: '6px 10px', borderRadius: 7, background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.25)', color: '#fca5a5', fontSize: 11, lineHeight: 1.5 }}>
+            {error}
+          </div>
+        )}
+        <div ref={chatEndRef} />
+      </div>
+
+      {/* Input */}
+      <div style={{ padding: '6px 8px', borderTop: '1px solid rgba(255,255,255,0.08)', flexShrink: 0 }}>
+        <div style={{ display: 'flex', gap: 5, alignItems: 'flex-end' }}>
+          <textarea
+            value={input}
+            onChange={e => onInputChange(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSend() } }}
+            placeholder="Ask a question… (Enter to send)"
+            rows={2}
+            style={{ flex: 1, background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 7, padding: '6px 8px', color: 'var(--text-primary)', fontSize: 12, resize: 'none', outline: 'none', fontFamily: 'inherit' }}
+          />
+          <button onClick={onSend} disabled={!input.trim() || loading}
+            style={{ padding: '7px 9px', borderRadius: 7, border: 'none', background: input.trim() && !loading ? 'rgba(99,102,241,0.35)' : 'rgba(255,255,255,0.06)', color: input.trim() && !loading ? '#a5b4fc' : 'var(--text-muted)', cursor: input.trim() && !loading ? 'pointer' : 'default', display: 'flex', alignItems: 'center' }}>
+            <Send size={13} />
+          </button>
+        </div>
+      </div>
+      <style>{`@keyframes spin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }`}</style>
+    </div>
   )
 }
 

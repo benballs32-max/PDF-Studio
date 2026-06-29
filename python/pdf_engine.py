@@ -671,6 +671,14 @@ def find_replace_text(input: str, output: str, find: str, replace: str, **_):
     _save(doc, input, output)
     return {"success": True, "replaced": total}
 
+def extract_text_full(input: str, **_):
+    """Return all text from every page, with page markers."""
+    import fitz
+    doc = fitz.open(input)
+    pages = [{"page": i + 1, "text": page.get_text()} for i, page in enumerate(doc)]
+    full_text = "\n\n".join(f"--- Page {p['page']} ---\n{p['text'].strip()}" for p in pages if p['text'].strip())
+    return {"success": True, "pages": pages, "full_text": full_text, "total": len(doc)}
+
 def compare_pages(input_a: str, input_b: str, output: str,
                   page_a: int = 0, page_b: int = 0, dpi: int = 150, **_):
     """Render two PDF pages and produce a visual diff image (red highlights = changed pixels)."""
@@ -744,6 +752,7 @@ COMMANDS = {
     "extract_images": extract_images,
     "split_by_bookmarks": split_by_bookmarks,
     "find_replace_text": find_replace_text,
+    "extract_text_full": extract_text_full,
     "compare_pages": compare_pages,
     "reorder_pages": reorder_pages,
     "extract_pages": extract_pages,

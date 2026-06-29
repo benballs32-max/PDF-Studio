@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   FileText, Wand2, ArrowRightLeft, Scissors, Merge, RotateCw,
   FileImage, FileType, FileSpreadsheet, Globe, Clock, X, Plus,
-  ShieldCheck, Upload, Package, Columns,
+  ShieldCheck, Upload, Package, Columns, Settings,
 } from 'lucide-react'
 import { getRecentFiles, addRecentFile, removeRecentFile, clearRecentFiles, type RecentFile } from '../utils/recentFiles'
 
@@ -173,8 +173,13 @@ export default function Home() {
 
         {/* ── Hero ── */}
         <motion.div initial="hidden" animate="show" custom={0} variants={fadeUp}>
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7, marginBottom: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
             <span className="glass-pill"><FileText size={11} /> PDF Studio</span>
+            <motion.button whileHover={{ scale: 1.08 }} whileTap={{ scale: 0.94 }} onClick={() => navigate('/settings')}
+              title="Settings"
+              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.07)', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 12 }}>
+              <Settings size={13} /> Settings
+            </motion.button>
           </div>
           <h1 style={{
             fontSize: 44,
