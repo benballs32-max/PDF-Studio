@@ -47,11 +47,11 @@ Cross off items as they are completed.
 - [x] Output a searchable text layer over the scan (invisible render_mode=3 text via PyMuPDF)
 - [x] Scanned docs become searchable via the existing Ctrl+F search
 
-## Phase 8 — Advanced
-- [ ] Compare two PDFs (side-by-side visual diff)
-- [ ] Comment threads (reply to individual annotations)
-- [ ] Annotation undo / redo stack
-- [ ] Batch operations (watermark / compress / convert an entire folder)
+## Phase 8 — Advanced ✅ DONE
+- [x] Compare two PDFs (side-by-side visual diff with red-highlight diff overlay)
+- [x] Comment threads (reply to individual annotations in Comments tab)
+- [x] Annotation undo / redo stack (Ctrl+Z/Y + sidebar buttons)
+- [x] Batch operations (compress / watermark / page numbers / PNG export on entire folder)
 
 ---
 

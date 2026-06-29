@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   minimize: () => ipcRenderer.send('window:minimize'),
   maximize: () => ipcRenderer.send('window:maximize'),
   close: () => ipcRenderer.send('window:close'),
+  print: () => ipcRenderer.send('window:print'),
 
   // File dialogs
   openPDF: () => ipcRenderer.invoke('dialog:openPDF'),

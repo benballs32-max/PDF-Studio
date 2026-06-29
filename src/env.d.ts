@@ -5,6 +5,7 @@ interface Window {
     minimize: () => void
     maximize: () => void
     close: () => void
+    print: () => void
     openPDF: () => Promise<string[]>
     savePath: (ext: string) => Promise<string | undefined>
     selectDir: () => Promise<string | undefined>

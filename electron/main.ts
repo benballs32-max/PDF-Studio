@@ -3,6 +3,7 @@ import { join, basename } from 'path'
 import { spawn } from 'child_process'
 import { readFile, copyFile, unlink } from 'fs/promises'
 import { tmpdir } from 'os'
+import { autoUpdater } from 'electron-updater'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -66,6 +67,22 @@ app.whenReady().then(() => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
+
+  // Check for updates silently in the background (only runs in packaged app)
+  if (!process.env.VITE_DEV_SERVER_URL) {
+    autoUpdater.checkForUpdatesAndNotify().catch(() => { /* no release yet */ })
+  }
+})
+
+autoUpdater.on('update-downloaded', () => {
+  dialog.showMessageBox(mainWindow!, {
+    type: 'info',
+    title: 'Update Ready',
+    message: 'A new version of PDF Studio has been downloaded. Restart to apply the update.',
+    buttons: ['Restart Now', 'Later'],
+  }).then(({ response }) => {
+    if (response === 0) autoUpdater.quitAndInstall()
+  })
 })
 
 app.on('window-all-closed', () => {
@@ -79,6 +96,7 @@ ipcMain.on('window:maximize', () => {
   else mainWindow?.maximize()
 })
 ipcMain.on('window:close', () => mainWindow?.close())
+ipcMain.on('window:print', () => mainWindow?.webContents.print())
 
 // IPC: open file dialog (generic, with caller-supplied filters)
 ipcMain.handle('dialog:openFiles', async (_, filters: { name: string; extensions: string[] }[], multiple: boolean) => {

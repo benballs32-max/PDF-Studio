@@ -9,7 +9,8 @@ import {
   MousePointer, Highlighter, PenLine, Type, Eraser,
   Search, ChevronUp, ChevronDown, Crop, LayoutGrid, FilePlus, CheckSquare,
   BookOpen, MessageSquare, Layers, EyeOff, Lock,
-  ClipboardList, Circle, ScanText,
+  ClipboardList, Circle, ScanText, Info, Layers2, ImageDown,
+  Printer, Replace, HelpCircle, FilePlus2, Scissors,
 } from 'lucide-react'
 import 'react-pdf/dist/Page/AnnotationLayer.css'
 import 'react-pdf/dist/Page/TextLayer.css'
@@ -132,6 +133,12 @@ export default function Editor() {
   const [formFieldConfig, setFormFieldConfig] = useState({ name: '', choices: '', value: '' })
   const [formsReloadKey, setFormsReloadKey] = useState(0)
   const [showOcr, setShowOcr] = useState(false)
+  const [showMetadata, setShowMetadata] = useState(false)
+  const [showShortcuts, setShowShortcuts] = useState(false)
+  const [replaceOpen, setReplaceOpen] = useState(false)
+  const [replaceQuery, setReplaceQuery] = useState('')
+  const [findReplaceCount, setFindReplaceCount] = useState<number | null>(null)
+  const replaceInputRef = useRef<HTMLInputElement>(null)
 
   const viewerRef = useRef<HTMLDivElement>(null)
   const overlayRef = useRef<HTMLCanvasElement>(null)
@@ -222,7 +229,20 @@ export default function Editor() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
-        e.preventDefault(); setSearchOpen(true)
+        e.preventDefault(); setSearchOpen(true); setReplaceOpen(false)
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'h') {
+        e.preventDefault(); setSearchOpen(true); setReplaceOpen(true)
+        setTimeout(() => replaceInputRef.current?.focus(), 40)
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault(); save()
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
+        e.preventDefault(); window.electronAPI?.print()
+      }
+      if (e.key === '?' && !e.ctrlKey) {
+        setShowShortcuts(true)
       }
       if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
         e.preventDefault(); undoAnnot()
@@ -609,6 +629,57 @@ export default function Editor() {
     setShowOcr(false)
   }
 
+  const runFlatten = async () => {
+    if (!activeFile || !window.confirm('Flatten PDF? Annotations will be baked into the page permanently and the text layer will be lost.')) return
+    const wf = await ensureWorkingCopy()
+    if (!wf) return
+    await window.electronAPI?.pdfCommand('flatten_pdf', { input: wf, output: wf })
+    await reloadPdf()
+  }
+
+  const runInsertBlankPage = async () => {
+    if (!activeFile) return
+    const wf = await ensureWorkingCopy()
+    if (!wf) return
+    await window.electronAPI?.pdfCommand('insert_blank_page', { input: wf, output: wf, position: pageNumber })
+    await reloadPdf()
+    goTo(pageNumber + 1)
+  }
+
+  const runExtractImages = async () => {
+    const src = workingFileRef.current ?? activeFile
+    if (!src) return
+    const outDir = await window.electronAPI?.selectDir()
+    if (!outDir) return
+    const res = await window.electronAPI?.pdfCommand('extract_images', { input: src, output: outDir }) as { count: number }
+    if (res.count === 0) alert('No embedded images found in this PDF.')
+    else window.electronAPI?.showItem(outDir)
+  }
+
+  const runFindReplace = async () => {
+    if (!searchQuery.trim()) return
+    const wf = await ensureWorkingCopy()
+    if (!wf) return
+    setFindReplaceCount(null)
+    const res = await window.electronAPI?.pdfCommand('find_replace_text', { input: wf, output: wf, find: searchQuery, replace: replaceQuery }) as { replaced: number }
+    setFindReplaceCount(res.replaced)
+    await reloadPdf()
+    if (res.replaced === 0) alert(`"${searchQuery}" was not found in this PDF.`)
+  }
+
+  const runSplitByBookmarks = async () => {
+    const src = workingFileRef.current ?? activeFile
+    if (!src) return
+    const outDir = await window.electronAPI?.selectDir()
+    if (!outDir) return
+    try {
+      const res = await window.electronAPI?.pdfCommand('split_by_bookmarks', { input: src, output: outDir }) as { count: number; files: string[] }
+      window.electronAPI?.showItem(res.files[0])
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err))
+    }
+  }
+
   const addFormField = async () => {
     if (!pendingFormField || !activeFile || !formFieldConfig.name.trim()) return
     const wf = await ensureWorkingCopy()
@@ -843,6 +914,12 @@ export default function Editor() {
         <ToolBarBtn onClick={openFromDialog} accent><Upload size={13} /> Open</ToolBarBtn>
         {activeFile && (
           <>
+            <ToolBarBtn onClick={() => window.electronAPI?.print()} title="Print (Ctrl+P)"><Printer size={13} /></ToolBarBtn>
+          </>
+        )}
+        <ToolBarBtn onClick={() => setShowShortcuts(true)} title="Keyboard shortcuts (?)"><HelpCircle size={13} /></ToolBarBtn>
+        {activeFile && (
+          <>
             {workingFile && (
               <span style={{ fontSize: 11, color: '#fbbf24', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
                 ● Unsaved page changes
@@ -889,6 +966,29 @@ export default function Editor() {
       <AnimatePresence>
         {showOcr && activeFile && (
           <OcrModal onClose={() => setShowOcr(false)} onRun={runOcr} />
+        )}
+      </AnimatePresence>
+
+      {/* Metadata modal */}
+      <AnimatePresence>
+        {showMetadata && activeFile && (
+          <MetadataModal
+            sourceFile={workingFileRef.current ?? activeFile}
+            onClose={() => setShowMetadata(false)}
+            onApply={async (meta) => {
+              const wf = await ensureWorkingCopy()
+              if (!wf) return
+              await window.electronAPI?.pdfCommand('set_metadata', { input: wf, output: wf, metadata: meta })
+              setShowMetadata(false)
+            }}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Shortcuts modal */}
+      <AnimatePresence>
+        {showShortcuts && (
+          <ShortcutsModal onClose={() => setShowShortcuts(false)} />
         )}
       </AnimatePresence>
 
@@ -961,7 +1061,7 @@ export default function Editor() {
                   </div>
                 )}
                 {leftTab === 'outline' && (
-                  <OutlinePanel sourceFile={activeFile} onPageClick={goTo} />
+                  <OutlinePanel sourceFile={activeFile} onPageClick={goTo} onSplitByBookmarks={runSplitByBookmarks} />
                 )}
                 {leftTab === 'comments' && (
                   <CommentsPanel annotations={annotations} pageNumber={pageNumber} onPageClick={goTo} onAddReply={addReply} />
@@ -1007,28 +1107,55 @@ export default function Editor() {
                   <motion.div
                     initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}
                     transition={{ duration: 0.15 }}
-                    style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', borderRadius: 10, background: 'rgba(15,12,41,0.92)', border: '1px solid rgba(255,255,255,0.15)', flexShrink: 0 }}
+                    style={{ display: 'flex', flexDirection: 'column', padding: '7px 12px', borderRadius: 10, background: 'rgba(15,12,41,0.92)', border: '1px solid rgba(255,255,255,0.15)', flexShrink: 0 }}
                   >
-                    <Search size={14} color="var(--text-muted)" style={{ flexShrink: 0 }} />
-                    <input
-                      ref={searchInputRef}
-                      value={searchQuery}
-                      onChange={e => setSearchQuery(e.target.value)}
-                      onKeyDown={e => {
-                        if (e.key === 'Enter') gotoMatch(e.shiftKey ? -1 : 1)
-                        if (e.key === 'Escape') { setSearchOpen(false); setSearchQuery('') }
-                      }}
-                      placeholder="Search in PDF…"
-                      style={{ background: 'none', border: 'none', color: 'var(--text-primary)', fontSize: 14, outline: 'none', flex: 1, minWidth: 160 }}
-                    />
-                    {searchQuery && (
-                      <span style={{ fontSize: 12, color: allMatches.length ? 'var(--text-muted)' : '#ef4444', whiteSpace: 'nowrap', flexShrink: 0 }}>
-                        {allMatches.length ? `${matchIdx + 1} / ${allMatches.length}` : 'No results'}
-                      </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <Search size={14} color="var(--text-muted)" style={{ flexShrink: 0 }} />
+                      <input
+                        ref={searchInputRef}
+                        value={searchQuery}
+                        onChange={e => setSearchQuery(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') gotoMatch(e.shiftKey ? -1 : 1)
+                          if (e.key === 'Escape') { setSearchOpen(false); setSearchQuery('') }
+                        }}
+                        placeholder="Search in PDF…"
+                        style={{ background: 'none', border: 'none', color: 'var(--text-primary)', fontSize: 14, outline: 'none', flex: 1, minWidth: 160 }}
+                      />
+                      {searchQuery && (
+                        <span style={{ fontSize: 12, color: allMatches.length ? 'var(--text-muted)' : '#ef4444', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                          {allMatches.length ? `${matchIdx + 1} / ${allMatches.length}` : 'No results'}
+                        </span>
+                      )}
+                      <TBtn onClick={() => gotoMatch(-1)} disabled={!allMatches.length} title="Previous (Shift+Enter)"><ChevronUp size={13} /></TBtn>
+                      <TBtn onClick={() => gotoMatch(1)}  disabled={!allMatches.length} title="Next (Enter)"><ChevronDown size={13} /></TBtn>
+                      <TBtn onClick={() => setReplaceOpen(o => !o)} active={replaceOpen} title="Find & Replace (Ctrl+H)"><Replace size={13} /></TBtn>
+                      <TBtn onClick={() => { setSearchOpen(false); setSearchQuery(''); setReplaceOpen(false); setFindReplaceCount(null) }} title="Close (Esc)"><X size={13} /></TBtn>
+                    </div>
+
+                    {/* Replace row */}
+                    {replaceOpen && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 6, borderTop: '1px solid rgba(255,255,255,0.08)', marginTop: 6 }}>
+                        <Replace size={14} color="var(--text-muted)" style={{ flexShrink: 0 }} />
+                        <input
+                          ref={replaceInputRef}
+                          value={replaceQuery}
+                          onChange={e => { setReplaceQuery(e.target.value); setFindReplaceCount(null) }}
+                          onKeyDown={e => { if (e.key === 'Enter') runFindReplace() }}
+                          placeholder="Replace with…"
+                          style={{ background: 'none', border: 'none', color: 'var(--text-primary)', fontSize: 14, outline: 'none', flex: 1, minWidth: 140 }}
+                        />
+                        {findReplaceCount !== null && (
+                          <span style={{ fontSize: 12, color: findReplaceCount > 0 ? '#34d399' : 'var(--text-muted)', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                            {findReplaceCount > 0 ? `${findReplaceCount} replaced` : 'Not found'}
+                          </span>
+                        )}
+                        <button onClick={runFindReplace} disabled={!searchQuery.trim() || !activeFile}
+                          style={{ padding: '4px 12px', borderRadius: 6, border: 'none', background: searchQuery.trim() ? 'rgba(99,102,241,0.3)' : 'rgba(255,255,255,0.06)', color: searchQuery.trim() ? '#a5b4fc' : 'var(--text-muted)', fontSize: 11, fontWeight: 600, cursor: searchQuery.trim() ? 'pointer' : 'default', whiteSpace: 'nowrap' }}>
+                          Replace All
+                        </button>
+                      </div>
                     )}
-                    <TBtn onClick={() => gotoMatch(-1)} disabled={!allMatches.length} title="Previous (Shift+Enter)"><ChevronUp size={13} /></TBtn>
-                    <TBtn onClick={() => gotoMatch(1)}  disabled={!allMatches.length} title="Next (Enter)"><ChevronDown size={13} /></TBtn>
-                    <TBtn onClick={() => { setSearchOpen(false); setSearchQuery('') }} title="Close (Esc)"><X size={13} /></TBtn>
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -1200,6 +1327,7 @@ export default function Editor() {
                 <SbSection title="Page">
                   <SbTool icon={<Crop size={14} />} label="Crop" sublabel="Trim current page" active={tool === 'crop'} onClick={() => setTool('crop')} />
                   <SbTool icon={<RotateCw size={14} />} label="Rotate" sublabel="Clockwise 90°" onClick={() => rotatePage('cw')} />
+                  <SbTool icon={<FilePlus2 size={14} />} label="Insert Blank Page" sublabel={`Add blank page after p.${pageNumber}`} onClick={runInsertBlankPage} />
                   <SbTool icon={<Trash2 size={14} />} label="Delete Page" sublabel={numPages <= 1 ? 'Only one page' : `Remove page ${pageNumber}`} disabled={numPages <= 1} onClick={deletePage} />
                 </SbSection>
 
@@ -1211,6 +1339,9 @@ export default function Editor() {
 
                 <SbSection title="Content">
                   <SbTool icon={<Layers size={14} />} label="Watermark & Stamp" sublabel="Headers, page numbers…" active={showContentTools} onClick={() => setShowContentTools(o => !o)} />
+                  <SbTool icon={<Info size={14} />} label="Metadata" sublabel="Title, author, keywords…" active={showMetadata} onClick={() => setShowMetadata(o => !o)} />
+                  <SbTool icon={<ImageDown size={14} />} label="Extract Images" sublabel="Save embedded images to folder" onClick={runExtractImages} />
+                  <SbTool icon={<Layers2 size={14} />} label="Flatten PDF" sublabel="Bake annotations permanently" onClick={runFlatten} />
                 </SbSection>
 
                 <SbSection title="Forms">
@@ -1666,9 +1797,10 @@ function PermissionsModal({ onClose, onApply }: {
 
 interface OutlineItem { level: number; title: string; page: number }
 
-function OutlinePanel({ sourceFile, onPageClick }: {
+function OutlinePanel({ sourceFile, onPageClick, onSplitByBookmarks }: {
   sourceFile: string | null
   onPageClick: (p: number) => void
+  onSplitByBookmarks: () => void
 }) {
   const [outline, setOutline] = useState<OutlineItem[]>([])
   const [loading, setLoading] = useState(false)
@@ -1690,7 +1822,8 @@ function OutlinePanel({ sourceFile, onPageClick }: {
   if (outline.length === 0) return <Empty>No bookmarks in this PDF</Empty>
 
   return (
-    <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 1, padding: '4px 4px' }}>
+    <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 1, padding: '4px 4px' }}>
       {outline.map((item, i) => (
         <button
           key={i}
@@ -1710,6 +1843,13 @@ function OutlinePanel({ sourceFile, onPageClick }: {
           <span style={{ fontSize: 10, color: 'var(--text-muted)', flexShrink: 0 }}>{item.page}</span>
         </button>
       ))}
+      </div>
+      <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', padding: '7px 6px 4px', flexShrink: 0 }}>
+        <button onClick={onSplitByBookmarks}
+          style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(99,102,241,0.35)', background: 'rgba(99,102,241,0.1)', color: '#a5b4fc', cursor: 'pointer', fontSize: 11, fontWeight: 600, width: '100%' }}>
+          <Scissors size={11} /> Split by bookmarks
+        </button>
+      </div>
     </div>
   )
 }
@@ -1933,9 +2073,9 @@ function TBtn({ onClick, disabled, active, title, children }: {
   )
 }
 
-function ToolBarBtn({ onClick, accent, children }: { onClick: () => void; accent?: boolean; children: React.ReactNode }) {
+function ToolBarBtn({ onClick, accent, title, children }: { onClick: () => void; accent?: boolean; title?: string; children: React.ReactNode }) {
   return (
-    <motion.button whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }} onClick={onClick}
+    <motion.button whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }} onClick={onClick} title={title}
       style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 500, background: accent ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.08)', border: `1px solid ${accent ? 'rgba(99,102,241,0.4)' : 'rgba(255,255,255,0.15)'}`, color: accent ? '#a5b4fc' : 'var(--text-secondary)' }}>
       {children}
     </motion.button>
@@ -1958,6 +2098,114 @@ function Spinner() {
 
 function ErrBox() {
   return <div style={{ padding: 32, color: '#ef4444', fontSize: 13, textAlign: 'center' }}>Could not load PDF</div>
+}
+
+// ── Metadata modal ───────────────────────────────────────────────────────────
+
+function MetadataModal({ sourceFile, onClose, onApply }: {
+  sourceFile: string
+  onClose: () => void
+  onApply: (meta: Record<string, string>) => Promise<void>
+}) {
+  const [meta, setMeta] = useState<Record<string, string>>({ title: '', author: '', subject: '', keywords: '', creator: '' })
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    window.electronAPI?.pdfCommand('get_metadata', { input: sourceFile })
+      .then(res => {
+        const m = (res as { metadata: Record<string, string> }).metadata ?? {}
+        setMeta({ title: m.title ?? '', author: m.author ?? '', subject: m.subject ?? '', keywords: m.keywords ?? '', creator: m.creator ?? '' })
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [sourceFile])
+
+  const fields: [string, string][] = [['title', 'Title'], ['author', 'Author'], ['subject', 'Subject'], ['keywords', 'Keywords'], ['creator', 'Creator']]
+
+  const apply = async () => {
+    setBusy(true)
+    try { await onApply(meta) } catch (e) { alert(e instanceof Error ? e.message : String(e)) } finally { setBusy(false) }
+  }
+
+  return (
+    <>
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 2000 }} />
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2001 }}>
+        <motion.div onClick={e => e.stopPropagation()}
+          initial={{ opacity: 0, scale: 0.94 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.94 }}
+          transition={{ duration: 0.14 }}
+          style={{ width: 380, background: 'rgba(10,8,32,0.97)', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 16, overflow: 'hidden', boxShadow: '0 28px 64px rgba(0,0,0,0.55)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 16px', borderBottom: '1px solid rgba(255,255,255,0.09)' }}>
+            <Info size={14} color="#a5b4fc" />
+            <span style={{ fontWeight: 700, fontSize: 14, flex: 1 }}>Document Metadata</span>
+            <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 2, display: 'flex' }}><X size={14} /></button>
+          </div>
+          <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {loading ? <div style={{ color: 'var(--text-muted)', fontSize: 13, textAlign: 'center', padding: 8 }}>Loading…</div> : (
+              fields.map(([key, label]) => (
+                <CtField key={key} label={label}>
+                  <CtInput value={meta[key]} onChange={e => setMeta(m => ({ ...m, [key]: e.target.value }))} placeholder={`Enter ${label.toLowerCase()}…`} />
+                </CtField>
+              ))
+            )}
+          </div>
+          <div style={{ padding: '0 16px 16px' }}>
+            <button onClick={apply} disabled={busy || loading}
+              style={{ width: '100%', padding: 10, borderRadius: 10, border: 'none', background: (busy || loading) ? 'rgba(99,102,241,0.3)' : 'linear-gradient(135deg,#6366f1,#8b5cf6)', color: 'white', fontSize: 13, fontWeight: 700, cursor: (busy || loading) ? 'default' : 'pointer' }}>
+              {busy ? 'Saving…' : 'Apply Metadata'}
+            </button>
+          </div>
+        </motion.div>
+      </div>
+    </>
+  )
+}
+
+// ── Shortcuts modal ──────────────────────────────────────────────────────────
+
+const SHORTCUTS = [
+  ['Ctrl + F',           'Search in document'],
+  ['Ctrl + H',           'Find & Replace'],
+  ['Ctrl + S',           'Save PDF'],
+  ['Ctrl + P',           'Print'],
+  ['Ctrl + Z',           'Undo annotation'],
+  ['Ctrl + Y / ⇧Z',     'Redo annotation'],
+  ['← / →',             'Previous / Next page'],
+  ['?',                  'Show this panel'],
+  ['Esc',                'Close search / cancel tool'],
+]
+
+function ShortcutsModal({ onClose }: { onClose: () => void }) {
+  return (
+    <>
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 2000 }} />
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2001 }}>
+        <motion.div onClick={e => e.stopPropagation()}
+          initial={{ opacity: 0, scale: 0.94 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.94 }}
+          transition={{ duration: 0.14 }}
+          style={{ width: 360, background: 'rgba(10,8,32,0.97)', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 16, overflow: 'hidden', boxShadow: '0 28px 64px rgba(0,0,0,0.55)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 16px', borderBottom: '1px solid rgba(255,255,255,0.09)' }}>
+            <HelpCircle size={14} color="#a5b4fc" />
+            <span style={{ fontWeight: 700, fontSize: 14, flex: 1 }}>Keyboard Shortcuts</span>
+            <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 2, display: 'flex' }}><X size={14} /></button>
+          </div>
+          <div style={{ padding: '10px 16px 16px', display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {SHORTCUTS.map(([key, desc]) => (
+              <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '7px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                <kbd style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 5, background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.18)', fontSize: 11, fontFamily: 'monospace', color: '#c7d2fe', whiteSpace: 'nowrap', flexShrink: 0, minWidth: 110, textAlign: 'center' }}>
+                  {key}
+                </kbd>
+                <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{desc}</span>
+              </div>
+            ))}
+          </div>
+        </motion.div>
+      </div>
+    </>
+  )
 }
 
 // ── OCR modal ────────────────────────────────────────────────────────────────

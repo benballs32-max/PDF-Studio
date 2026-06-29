@@ -574,6 +574,103 @@ def decrypt_pdf(input: str, output: str, password: str, **_):
     doc.save(output, encryption=fitz.PDF_ENCRYPT_NONE)
     return {"success": True}
 
+def get_metadata(input: str, **_):
+    import fitz
+    doc = fitz.open(input)
+    return {"success": True, "metadata": doc.metadata}
+
+def set_metadata(input: str, output: str, metadata: dict, **_):
+    import fitz
+    doc = fitz.open(input)
+    doc.set_metadata(metadata)
+    _save(doc, input, output)
+    return {"success": True}
+
+def flatten_pdf(input: str, output: str, **_):
+    """Rasterise every page (annotations baked in). Text layer is lost."""
+    import fitz
+    doc = fitz.open(input)
+    new_doc = fitz.open()
+    for page in doc:
+        pix = page.get_pixmap(matrix=fitz.Matrix(1, 1), annots=True, alpha=False)
+        new_page = new_doc.new_page(width=page.rect.width, height=page.rect.height)
+        new_page.insert_image(new_page.rect, pixmap=pix)
+    doc.close()
+    new_doc.save(output)
+    return {"success": True, "pages": len(new_doc)}
+
+def insert_blank_page(input: str, output: str, position: int, width: float = 595, height: float = 842, **_):
+    import fitz
+    doc = fitz.open(input)
+    doc.new_page(pno=position, width=width, height=height)
+    count = len(doc)
+    _save(doc, input, output)
+    return {"success": True, "pages": count}
+
+def extract_images(input: str, output: str, **_):
+    import fitz, os
+    doc = fitz.open(input)
+    os.makedirs(output, exist_ok=True)
+    saved = []
+    seen = set()
+    for page_num, page in enumerate(doc):
+        for img_info in page.get_images(full=True):
+            xref = img_info[0]
+            if xref in seen:
+                continue
+            seen.add(xref)
+            img_data = doc.extract_image(xref)
+            ext = img_data["ext"]
+            path = os.path.join(output, f"image_p{page_num+1}_{xref}.{ext}")
+            with open(path, "wb") as f:
+                f.write(img_data["image"])
+            saved.append(path)
+    return {"success": True, "count": len(saved), "files": saved}
+
+def split_by_bookmarks(input: str, output: str, **_):
+    import fitz, os, re
+    doc = fitz.open(input)
+    toc = doc.get_toc()
+    if not toc:
+        raise ValueError("This PDF has no bookmarks to split by.")
+    os.makedirs(output, exist_ok=True)
+    chapters = [(t[1], t[2] - 1) for t in toc if t[0] == 1]
+    if not chapters:
+        raise ValueError("No top-level bookmarks found.")
+    saved = []
+    for i, (title, start_page) in enumerate(chapters):
+        end_page = chapters[i + 1][1] - 1 if i + 1 < len(chapters) else len(doc) - 1
+        out = fitz.open()
+        out.insert_pdf(doc, from_page=start_page, to_page=end_page)
+        safe = re.sub(r'[<>:"/\\|?*]', '_', title)[:60].strip() or f"chapter_{i+1}"
+        path = os.path.join(output, f"{i+1:02d}_{safe}.pdf")
+        out.save(path)
+        saved.append(path)
+    return {"success": True, "count": len(saved), "files": saved}
+
+def find_replace_text(input: str, output: str, find: str, replace: str, **_):
+    import fitz
+    if not find:
+        raise ValueError("Search text cannot be empty.")
+    doc = fitz.open(input)
+    total = 0
+    for page in doc:
+        hits = page.search_for(find)
+        if not hits:
+            continue
+        total += len(hits)
+        for rect in hits:
+            page.add_redact_annot(rect, fill=(1, 1, 1))
+        page.apply_redactions()
+        for rect in hits:
+            fs = max(6.0, rect.height * 0.85)
+            page.insert_text(
+                fitz.Point(rect.x0, rect.y1 - fs * 0.15),
+                replace, fontsize=fs, fontname="helv", color=(0, 0, 0), overlay=True,
+            )
+    _save(doc, input, output)
+    return {"success": True, "replaced": total}
+
 def compare_pages(input_a: str, input_b: str, output: str,
                   page_a: int = 0, page_b: int = 0, dpi: int = 150, **_):
     """Render two PDF pages and produce a visual diff image (red highlights = changed pixels)."""
@@ -640,6 +737,13 @@ COMMANDS = {
     "set_permissions": set_permissions,
     "encrypt_pdf": encrypt_pdf,
     "decrypt_pdf": decrypt_pdf,
+    "get_metadata": get_metadata,
+    "set_metadata": set_metadata,
+    "flatten_pdf": flatten_pdf,
+    "insert_blank_page": insert_blank_page,
+    "extract_images": extract_images,
+    "split_by_bookmarks": split_by_bookmarks,
+    "find_replace_text": find_replace_text,
     "compare_pages": compare_pages,
     "reorder_pages": reorder_pages,
     "extract_pages": extract_pages,
