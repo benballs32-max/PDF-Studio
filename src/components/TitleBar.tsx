@@ -1,17 +1,25 @@
+import { useState } from 'react'
 import { Minus, Square, X } from 'lucide-react'
+
+const CONTROLS = [
+  { icon: <X size={9} />,     action: 'close',    color: '#ff5f57', hover: '#ff3b30' },
+  { icon: <Minus size={9} />, action: 'minimize', color: '#febc2e', hover: '#ffb900' },
+  { icon: <Square size={8} />,action: 'maximize', color: '#28c840', hover: '#24b835' },
+]
 
 export default function TitleBar() {
   const api = window.electronAPI
+  const [hovered, setHovered] = useState(false)
 
   return (
     <div
       className="glass-sm"
       style={{
-        height: 40,
+        height: 44,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: '0 12px',
+        padding: '0 16px',
         WebkitAppRegion: 'drag' as never,
         borderRadius: 0,
         borderLeft: 'none',
@@ -22,41 +30,49 @@ export default function TitleBar() {
         zIndex: 100,
       } as React.CSSProperties}
     >
-      <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', letterSpacing: '0.02em' }}>
-        PDF Studio
-      </span>
-
+      {/* Traffic lights */}
       <div
-        style={{ display: 'flex', gap: 8, WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+        style={{ display: 'flex', gap: 8, WebkitAppRegion: 'no-drag', alignItems: 'center' } as React.CSSProperties}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
       >
-        {[
-          { icon: <Minus size={12} />, action: () => api?.minimize(), color: '#f59e0b' },
-          { icon: <Square size={10} />, action: () => api?.maximize(), color: '#22c55e' },
-          { icon: <X size={12} />, action: () => api?.close(), color: '#ef4444' },
-        ].map(({ icon, action, color }, i) => (
+        {CONTROLS.map(({ icon, action, color, hover }) => (
           <button
-            key={i}
-            onClick={action}
-            style={{
-              width: 24,
-              height: 24,
-              borderRadius: '50%',
-              border: `1px solid ${color}55`,
-              background: `${color}22`,
-              color,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer',
-              transition: 'background 0.15s ease',
+            key={action}
+            onClick={() => {
+              if (action === 'close') api?.close()
+              else if (action === 'minimize') api?.minimize()
+              else api?.maximize()
             }}
-            onMouseEnter={(e) => (e.currentTarget.style.background = `${color}44`)}
-            onMouseLeave={(e) => (e.currentTarget.style.background = `${color}22`)}
+            style={{
+              width: 13, height: 13, borderRadius: '50%',
+              border: 'none', cursor: 'pointer',
+              background: color,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: 'rgba(0,0,0,0.65)',
+              transition: 'background 0.12s, transform 0.1s',
+              flexShrink: 0,
+              boxShadow: `0 0 0 0.5px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.2)`,
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = hover; e.currentTarget.style.transform = 'scale(1.1)' }}
+            onMouseLeave={e => { e.currentTarget.style.background = color; e.currentTarget.style.transform = 'scale(1)' }}
           >
-            {icon}
+            <span style={{ opacity: hovered ? 1 : 0, transition: 'opacity 0.1s', lineHeight: 0 }}>{icon}</span>
           </button>
         ))}
       </div>
+
+      {/* Centered title */}
+      <span style={{
+        position: 'absolute', left: '50%', transform: 'translateX(-50%)',
+        fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.45)',
+        letterSpacing: '0.04em', userSelect: 'none', pointerEvents: 'none',
+      }}>
+        PDF Studio
+      </span>
+
+      {/* Right spacer to balance traffic lights */}
+      <div style={{ width: 53 }} />
     </div>
   )
 }

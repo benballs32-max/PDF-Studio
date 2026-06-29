@@ -323,48 +323,43 @@ function ToolCard({ tool, index, onClick }: { tool: Tool; index: number; onClick
     <motion.button
       initial="hidden" animate="show" custom={index} variants={fadeUp}
       onClick={onClick}
-      whileHover={{ y: -3, scale: 1.015 }}
+      whileHover={{ y: -5, scale: 1.025 }}
       whileTap={{ scale: 0.975 }}
       style={{
-        borderRadius: 14,
-        padding: '15px',
-        textAlign: 'left',
-        cursor: 'pointer',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 11,
-        background: 'rgba(255,255,255,0.07)',
-        border: '1px solid rgba(255,255,255,0.1)',
-        backdropFilter: 'blur(20px)',
-        WebkitBackdropFilter: 'blur(20px)',
-        transition: 'border-color 0.2s, box-shadow 0.2s',
-        position: 'relative',
-        overflow: 'hidden',
+        borderRadius: 16, padding: '17px 16px',
+        textAlign: 'left', cursor: 'pointer',
+        display: 'flex', flexDirection: 'column', gap: 13,
+        background: `linear-gradient(150deg, ${tool.color}12 0%, rgba(255,255,255,0.025) 70%)`,
+        border: `1px solid ${tool.color}25`,
+        backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)',
+        transition: 'border-color 0.22s, box-shadow 0.22s, background 0.22s, transform 0.22s',
+        boxShadow: `inset 0 1px 0 rgba(255,255,255,0.08), inset 0 -1px 0 rgba(0,0,0,0.08)`,
+        position: 'relative', overflow: 'hidden',
       }}
       onMouseEnter={e => {
         e.currentTarget.style.borderColor = `${tool.color}55`
-        e.currentTarget.style.boxShadow = `0 8px 30px ${tool.glow}, inset 0 1px 0 rgba(255,255,255,0.15)`
+        e.currentTarget.style.background = `linear-gradient(150deg, ${tool.color}1e 0%, rgba(255,255,255,0.045) 70%)`
+        e.currentTarget.style.boxShadow = `0 18px 52px ${tool.glow}, 0 4px 16px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.14)`
       }}
       onMouseLeave={e => {
-        e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)'
-        e.currentTarget.style.boxShadow = 'none'
+        e.currentTarget.style.borderColor = `${tool.color}25`
+        e.currentTarget.style.background = `linear-gradient(150deg, ${tool.color}12 0%, rgba(255,255,255,0.025) 70%)`
+        e.currentTarget.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,0.08), inset 0 -1px 0 rgba(0,0,0,0.08)`
       }}
     >
-      {/* Subtle top-edge colour stripe */}
-      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: `linear-gradient(90deg, ${tool.color}00, ${tool.color}88, ${tool.color}00)`, opacity: 0.7 }} />
-
       <div style={{
-        width: 36, height: 36, borderRadius: 10,
-        background: `linear-gradient(135deg, ${tool.color}28, ${tool.color}0e)`,
-        border: `1px solid ${tool.color}38`,
+        width: 40, height: 40, borderRadius: 11, flexShrink: 0,
+        background: `linear-gradient(145deg, ${tool.color}38, ${tool.color}18)`,
+        border: `1px solid ${tool.color}45`,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         color: tool.color,
+        boxShadow: `0 4px 16px ${tool.color}30, inset 0 1px 0 ${tool.color}35`,
       }}>
         {tool.icon}
       </div>
       <div>
-        <div style={{ fontWeight: 600, fontSize: 13, color: 'rgba(255,255,255,0.9)', marginBottom: 3 }}>{tool.label}</div>
-        <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.38)', lineHeight: 1.45 }}>{tool.description}</div>
+        <div style={{ fontWeight: 700, fontSize: 13, color: 'rgba(255,255,255,0.92)', marginBottom: 4, letterSpacing: '-0.01em' }}>{tool.label}</div>
+        <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.38)', lineHeight: 1.5 }}>{tool.description}</div>
       </div>
     </motion.button>
   )
@@ -423,14 +418,14 @@ function HeroBtn({ children, onClick, primary }: { children: React.ReactNode; on
   return (
     <motion.button
       onClick={onClick}
-      whileHover={{ scale: 1.04 }}
+      whileHover={{ scale: 1.05, y: -1 }}
       whileTap={{ scale: 0.97 }}
       style={{
         display: 'flex', alignItems: 'center', gap: 7,
-        padding: '10px 20px', borderRadius: 10, cursor: 'pointer',
+        padding: '10px 22px', borderRadius: 11, cursor: 'pointer',
         fontSize: 13, fontWeight: 600,
         background: primary
-          ? 'linear-gradient(135deg, #f43f5e 0%, #a855f7 100%)'
+          ? 'linear-gradient(135deg, #f43f5e 0%, #c026d3 50%, #7c3aed 100%)'
           : 'rgba(255,255,255,0.09)',
         border: primary
           ? '1px solid rgba(244,63,94,0.45)'

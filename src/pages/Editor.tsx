@@ -1532,9 +1532,10 @@ export default function Editor() {
 
 function SbSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div style={{ marginTop: 4 }}>
-      <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)', padding: '8px 12px 4px' }}>
-        {title}
+    <div style={{ marginTop: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '9px 12px 5px' }}>
+        <div style={{ width: 2, height: 9, borderRadius: 2, background: 'linear-gradient(180deg, rgba(99,102,241,0.8), rgba(139,92,246,0.4))', flexShrink: 0 }} />
+        <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--text-muted)' }}>{title}</span>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 1, padding: '0 6px' }}>
         {children}
@@ -1551,24 +1552,26 @@ function SbTool({ icon, label, sublabel, active, disabled, onClick }: {
     <button
       onClick={onClick} disabled={disabled}
       style={{
-        display: 'flex', alignItems: 'center', gap: 9, padding: '7px 8px', borderRadius: 8,
+        display: 'flex', alignItems: 'center', gap: 9,
+        padding: '7px 8px 7px 10px', borderRadius: 8,
         width: '100%', textAlign: 'left', cursor: disabled ? 'default' : 'pointer',
-        background: active ? 'rgba(99,102,241,0.2)' : 'transparent',
-        border: `1px solid ${active ? 'rgba(99,102,241,0.4)' : 'transparent'}`,
-        transition: 'background 0.12s',
+        background: active ? 'rgba(99,102,241,0.16)' : 'transparent',
+        border: 'none',
+        borderLeft: `2px solid ${active ? 'rgba(99,102,241,0.75)' : 'transparent'}`,
+        transition: 'background 0.14s, border-color 0.14s',
       }}
-      onMouseEnter={e => { if (!disabled && !active) e.currentTarget.style.background = 'rgba(255,255,255,0.07)' }}
-      onMouseLeave={e => { e.currentTarget.style.background = active ? 'rgba(99,102,241,0.2)' : 'transparent' }}
+      onMouseEnter={e => { if (!disabled && !active) { e.currentTarget.style.background = 'rgba(255,255,255,0.065)'; e.currentTarget.style.borderLeftColor = 'rgba(255,255,255,0.12)' } }}
+      onMouseLeave={e => { e.currentTarget.style.background = active ? 'rgba(99,102,241,0.16)' : 'transparent'; e.currentTarget.style.borderLeftColor = active ? 'rgba(99,102,241,0.75)' : 'transparent' }}
     >
-      <div style={{ color: active ? '#a5b4fc' : disabled ? 'rgba(255,255,255,0.2)' : 'var(--text-muted)', flexShrink: 0, display: 'flex', alignItems: 'center' }}>
+      <div style={{ color: active ? '#a5b4fc' : disabled ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.38)', flexShrink: 0, display: 'flex', alignItems: 'center' }}>
         {icon}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
-        <span style={{ fontSize: 12, fontWeight: active ? 600 : 400, color: active ? '#c7d2fe' : disabled ? 'rgba(255,255,255,0.25)' : 'var(--text-secondary)', lineHeight: 1.3 }}>
+        <span style={{ fontSize: 12, fontWeight: active ? 600 : 400, color: active ? '#c7d2fe' : disabled ? 'rgba(255,255,255,0.22)' : 'var(--text-secondary)', lineHeight: 1.3 }}>
           {label}
         </span>
         {sublabel && (
-          <span style={{ fontSize: 10, color: disabled ? 'rgba(255,255,255,0.15)' : 'var(--text-muted)', lineHeight: 1.3 }}>
+          <span style={{ fontSize: 10, color: disabled ? 'rgba(255,255,255,0.14)' : 'var(--text-muted)', lineHeight: 1.3 }}>
             {sublabel}
           </span>
         )}
