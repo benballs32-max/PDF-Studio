@@ -671,6 +671,36 @@ def find_replace_text(input: str, output: str, find: str, replace: str, **_):
     _save(doc, input, output)
     return {"success": True, "replaced": total}
 
+def extract_tables(input: str, **_):
+    """Extract all tables from every page, returned as structured JSON data."""
+    import fitz
+    doc = fitz.open(input)
+    result = []
+    for page_num, page in enumerate(doc):
+        try:
+            tabs = page.find_tables()
+            for t_num, tab in enumerate(tabs.tables):
+                data = tab.extract()
+                if data:
+                    result.append({
+                        "page": page_num + 1,
+                        "table_index": t_num + 1,
+                        "rows": len(data),
+                        "cols": len(data[0]) if data else 0,
+                        "data": [[cell if cell is not None else "" for cell in row] for row in data],
+                    })
+        except Exception:
+            pass
+    return {"success": True, "count": len(result), "tables": result}
+
+def set_bookmarks(input: str, output: str, toc: list, **_):
+    """Write a new table of contents into the PDF. toc = [{level, title, page}]."""
+    import fitz
+    doc = fitz.open(input)
+    doc.set_toc([[t["level"], t["title"], t["page"]] for t in toc])
+    _save(doc, input, output)
+    return {"success": True, "count": len(toc)}
+
 def extract_text_full(input: str, **_):
     """Return all text from every page, with page markers."""
     import fitz
@@ -753,6 +783,8 @@ COMMANDS = {
     "split_by_bookmarks": split_by_bookmarks,
     "find_replace_text": find_replace_text,
     "extract_text_full": extract_text_full,
+    "extract_tables": extract_tables,
+    "set_bookmarks": set_bookmarks,
     "compare_pages": compare_pages,
     "reorder_pages": reorder_pages,
     "extract_pages": extract_pages,

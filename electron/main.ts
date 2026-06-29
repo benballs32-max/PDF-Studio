@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron'
 import { join, basename } from 'path'
 import { spawn } from 'child_process'
-import { readFile, copyFile, unlink } from 'fs/promises'
+import { readFile, copyFile, unlink, rename } from 'fs/promises'
 import { tmpdir } from 'os'
 import { autoUpdater } from 'electron-updater'
 
@@ -152,6 +152,10 @@ ipcMain.handle('fs:makeTempCopy', async (_, src: string) => {
 
 ipcMain.handle('fs:deleteTempFile', async (_, path: string) => {
   try { await unlink(path) } catch { /* already gone */ }
+})
+
+ipcMain.handle('fs:renameFile', async (_, oldPath: string, newPath: string) => {
+  await rename(oldPath, newPath)
 })
 
 // IPC: open output file in explorer

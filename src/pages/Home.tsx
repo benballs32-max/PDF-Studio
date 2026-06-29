@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   FileText, Wand2, ArrowRightLeft, Scissors, Merge, RotateCw,
   FileImage, FileType, FileSpreadsheet, Globe, Clock, X, Plus,
-  ShieldCheck, Upload, Package, Columns, Settings,
+  ShieldCheck, Upload, Package, Columns, Settings, Bot,
 } from 'lucide-react'
 import { getRecentFiles, addRecentFile, removeRecentFile, clearRecentFiles, type RecentFile } from '../utils/recentFiles'
 
@@ -108,6 +108,14 @@ const tools: Tool[] = [
     route: '/compare',
     color: '#ec4899',
     glow: 'rgba(236,72,153,0.28)',
+  },
+  {
+    icon: <Bot size={19} />,
+    label: 'AI Studio',
+    description: 'Chat, analyse, search & extract with AI',
+    route: '/ai-studio',
+    color: '#8b5cf6',
+    glow: 'rgba(139,92,246,0.32)',
   },
 ]
 

@@ -7,6 +7,7 @@ import ImportPDF from './pages/ImportPDF'
 import Batch from './pages/Batch'
 import Compare from './pages/Compare'
 import Settings from './pages/Settings'
+import AIStudio from './pages/AIStudio'
 import './styles/glass.css'
 
 export default function App() {
@@ -32,6 +33,7 @@ export default function App() {
           <Route path="/batch" element={<Batch />} />
           <Route path="/compare" element={<Compare />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/ai-studio" element={<AIStudio />} />
         </Routes>
       </div>
     </div>

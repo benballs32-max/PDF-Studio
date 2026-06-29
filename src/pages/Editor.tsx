@@ -1222,6 +1222,7 @@ export default function Editor() {
                     loading={aiLoading}
                     error={aiError}
                     hasFile={!!activeFile}
+                    classification={aiClassification}
                     chatEndRef={aiChatEndRef}
                     onInputChange={setAiInput}
                     onSend={sendAIMessage}
@@ -2369,12 +2370,24 @@ function ShortcutsModal({ onClose }: { onClose: () => void }) {
 
 // ── AI Chat Panel ────────────────────────────────────────────────────────────
 
-function AIChatPanel({ messages, input, loading, error, hasFile, chatEndRef, onInputChange, onSend, onClear }: {
+function suggestedQuestions(classification: string | null): string[] {
+  const c = (classification ?? '').toLowerCase()
+  if (c.includes('contract') || c.includes('agreement') || c.includes('legal'))
+    return ['Who are the parties?', 'What are the key obligations?', 'Are there any red flags?', 'What are the key dates?']
+  if (c.includes('invoice') || c.includes('financial') || c.includes('report'))
+    return ['What is the total amount?', 'What are the key figures?', 'Who is the payee?', 'What period does this cover?']
+  if (c.includes('cv') || c.includes('resume'))
+    return ['What are the key skills?', 'What roles have they held?', 'What is their education?', 'How many years of experience?']
+  return ['Summarise this document', 'What are the key points?', 'Who is this for?', 'What action items are mentioned?']
+}
+
+function AIChatPanel({ messages, input, loading, error, hasFile, classification, chatEndRef, onInputChange, onSend, onClear }: {
   messages: AIMessage[]
   input: string
   loading: boolean
   error: string | null
   hasFile: boolean
+  classification: string | null
   chatEndRef: React.RefObject<HTMLDivElement>
   onInputChange: (v: string) => void
   onSend: () => void
@@ -2398,10 +2411,16 @@ function AIChatPanel({ messages, input, loading, error, hasFile, chatEndRef, onI
       {/* Messages */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 8 }}>
         {messages.length === 0 && !loading && (
-          <div style={{ color: 'var(--text-muted)', fontSize: 11, textAlign: 'center', marginTop: 20, lineHeight: 1.6 }}>
-            {hasFile
-              ? 'Ask anything about this document — or use the AI tools in the right sidebar.'
-              : 'Open a PDF to start chatting with AI.'}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
+            <div style={{ color: 'var(--text-muted)', fontSize: 11, textAlign: 'center', lineHeight: 1.6 }}>
+              {hasFile ? 'Ask anything, or try a suggestion:' : 'Open a PDF to start chatting with AI.'}
+            </div>
+            {hasFile && suggestedQuestions(classification).map(q => (
+              <button key={q} onClick={() => { onInputChange(q); setTimeout(onSend, 0) }}
+                style={{ padding: '6px 10px', borderRadius: 7, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.04)', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 11, textAlign: 'left', lineHeight: 1.3 }}>
+                {q}
+              </button>
+            ))}
           </div>
         )}
         {messages.map((m, i) => (

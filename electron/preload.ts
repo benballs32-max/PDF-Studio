@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readFile: (path: string) => ipcRenderer.invoke('fs:readFile', path),
   makeTempCopy: (src: string) => ipcRenderer.invoke('fs:makeTempCopy', src),
   deleteTempFile: (path: string) => ipcRenderer.invoke('fs:deleteTempFile', path),
+  renameFile: (oldPath: string, newPath: string) => ipcRenderer.invoke('fs:renameFile', oldPath, newPath),
 
   // PDF processing
   pdfCommand: (cmd: string, args: object) =>
