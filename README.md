@@ -4,6 +4,9 @@ A premium, feature-complete PDF editor for Windows built with Electron, React, a
 
 ![PDF Studio](https://img.shields.io/badge/platform-Windows-blue) ![Electron](https://img.shields.io/badge/Electron-33-47848F) ![React](https://img.shields.io/badge/React-18-61DAFB) ![Python](https://img.shields.io/badge/Python-3.8+-3776AB)
 
+<img width="1913" height="988" alt="image" src="https://github.com/user-attachments/assets/0d66c058-260a-4555-abe0-c4b60b0df57b" />
+
+
 ---
 
 ## Table of Contents
@@ -88,6 +91,9 @@ The Home screen is your launchpad. From here you can:
 
 The Editor is a three-panel layout:
 
+<img width="1909" height="984" alt="image" src="https://github.com/user-attachments/assets/6d927a49-bbf4-4c06-b08a-0a5e6be9c932" />
+
+
 ```
 ┌─────────────┬────────────────────────────┬──────────────┐
 │  Left       │                            │   Right      │
@@ -135,6 +141,9 @@ To **save**, use the Save button in the toolbar. The original file is overwritte
 ### Find & Replace
 
 Press **Ctrl+F** or click the search icon in the toolbar.
+
+<img width="1469" height="41" alt="image" src="https://github.com/user-attachments/assets/b8df52c0-7a66-4b4d-9119-36694c304c9d" />
+
 
 1. Type in the **Find** field — all matches across every page are highlighted in real time
 2. Use **↑ / ↓** buttons (or Enter / Shift+Enter) to move between matches. The viewer jumps to the active match
@@ -234,6 +243,8 @@ PDF Studio sends the document to your system's native Windows print dialog, givi
 
 Navigate to **Convert** from the Home screen.
 
+<img width="1901" height="986" alt="image" src="https://github.com/user-attachments/assets/65d8c6f3-11d6-4fe1-8db2-7bb84a4afe47" />
+
 **PDF to another format:**
 1. Drop your PDF into the input zone (or click to browse)
 2. Choose an output format:
@@ -257,7 +268,9 @@ Navigate to **Convert** from the Home screen.
 
 ### Importing to PDF
 
-Navigate to **Import** from the Home screen to build a PDF from scratch.
+Navigate to **Merge** from the Home screen to build a PDF from scratch.
+
+<img width="1891" height="975" alt="image" src="https://github.com/user-attachments/assets/26c340ba-5470-45b9-a8d2-0c5cadc1d3e8" />
 
 - Drop in one or more image files
 - They are combined into a single PDF, one image per page, in the order you arranged them
@@ -268,6 +281,8 @@ Navigate to **Import** from the Home screen to build a PDF from scratch.
 ### Batch Processing
 
 Navigate to **Batch** from the Home screen to process many files at once.
+
+<img width="1908" height="989" alt="image" src="https://github.com/user-attachments/assets/43579840-3eed-40f5-b27a-eae34f964b3d" />
 
 | Operation | How to use |
 |---|---|
@@ -285,6 +300,8 @@ Progress and output file locations are shown after each operation completes.
 ### Comparing PDFs
 
 Navigate to **Compare** from the Home screen.
+
+<img width="1906" height="981" alt="image" src="https://github.com/user-attachments/assets/be334b77-96d2-4e96-8c6d-b2de5beed084" />
 
 1. Load the **original** PDF on the left panel
 2. Load the **revised** PDF on the right panel
@@ -331,6 +348,8 @@ For very large documents, text is automatically truncated to fit within the mode
 ### AI Studio
 
 Navigate to **AI Studio** from the Home screen for six dedicated AI-powered tools designed for deeper document work.
+
+<img width="1899" height="979" alt="image" src="https://github.com/user-attachments/assets/905cb9f5-1511-4fbf-9901-613e5be52640" />
 
 Tool state is preserved when you switch between tools — your chat history, extracted text, and results stay in memory until you close AI Studio.
 
