@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron'
 import { join, basename } from 'path'
 import { spawn } from 'child_process'
-import { readFile, copyFile, unlink, rename } from 'fs/promises'
+import { readFile, writeFile, copyFile, unlink, rename } from 'fs/promises'
 import { tmpdir } from 'os'
 import { autoUpdater } from 'electron-updater'
 
@@ -165,6 +165,20 @@ ipcMain.handle('shell:showItem', async (_, path: string) => {
 
 // IPC: run python command
 ipcMain.handle('pdf:command', async (_, cmd: string, args: object) => {
+  // url_to_pdf: use Electron's bundled Chromium — no playwright/weasyprint needed
+  if (cmd === 'url_to_pdf') {
+    const { url, output } = args as { url: string; output: string }
+    const win = new BrowserWindow({ show: false, webPreferences: { javascript: true } })
+    try {
+      await win.loadURL(url)
+      const pdfData = await win.webContents.printToPDF({ pageSize: 'A4', printBackground: true })
+      await writeFile(output, pdfData)
+      return { success: true }
+    } finally {
+      win.destroy()
+    }
+  }
+
   const { bin, prefix } = sidecar()
   const payload = JSON.stringify({ cmd, ...args })
 

@@ -198,8 +198,8 @@ export default function ImportPDF() {
             </div>
 
             <Note>
-              Best quality: <code>pip install playwright &amp;&amp; playwright install chromium</code><br />
-              Lightweight: <code>pip install weasyprint</code>
+              Renders the page using the built-in browser — no extra installs required.
+              JavaScript, images, and CSS are all supported.
             </Note>
 
             <ApplyBtn color={activeTab.color} disabled={!url.trim() || status === 'working'} busy={status === 'working'}
